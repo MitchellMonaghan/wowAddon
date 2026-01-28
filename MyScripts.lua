@@ -354,13 +354,18 @@ end)
 -- loader:RegisterEvent("PLAYER_REGEN_ENABLED")
 -- loader:RegisterEvent("PLAYER_REGEN_DISABLED")
 
--- 1. Create your alert frame (The Icon and Sound)
-local myAlert = CreateFrame("Frame", "MyHealingHijacker", UIParent)
-myAlert:SetSize(80, 80)
-myAlert:SetPoint("CENTER", 0, 0)
-myAlert.tex = myAlert:CreateTexture(nil, "OVERLAY")
-myAlert.tex:SetAllPoints()
-myAlert:Hide()
+------------------------------------------ Low Health Aura ---------------------------------
+--------------------------------------------------------------------------------------------
+local lowHealthTracker = CreateFrame("Frame", "MyHealingHijacker", UIParent)
+lowHealthTracker:SetSize(80, 80)
+lowHealthTracker:SetPoint("CENTER", 0, 0)
+lowHealthTracker.tex = lowHealthTracker:CreateTexture(nil, "OVERLAY")
+lowHealthTracker.tex:SetAllPoints()
+lowHealthTracker:Hide()
+
+local HS_ID    = 5512
+local POT_NAME = "Algari Healing Potion"
+local POT_ID   = 211878
 
 -- 2. HIJACK THE BLIZZARD FRAME
 -- 'LowHealthFrame' is the red flashing edges. 
@@ -368,33 +373,32 @@ myAlert:Hide()
 if LowHealthFrame then
     -- When the red flash starts...
     LowHealthFrame:HookScript("OnShow", function()
-        myAlert:Show()
-        -- PlaySound(3121, "Master")
+        lowHealthTracker:Show()
         PlaySoundFile("Interface\\AddOns\\MyScripts\\PowerAurasMedia\\Sounds\\Gasp.ogg", "Master")
     end)
 
     -- When the red flash stops...
     LowHealthFrame:HookScript("OnHide", function()
-        myAlert:Hide()
+        lowHealthTracker:Hide()
     end)
 end
 
 -- 3. Visuals: What icon to show?
-myAlert:SetScript("OnShow", function(self)
-    local hsCount = C_Item.GetItemCount(5512, false, true)
+lowHealthTracker:SetScript("OnShow", function(self)
+    local hsCount = C_Item.GetItemCount(HS_ID, false, true)
     if hsCount > 0 then
-        self.tex:SetTexture(C_Item.GetItemIconByID(5512))
+        self.tex:SetTexture(C_Item.GetItemIconByID(HS_ID))
     else
-        self.tex:SetTexture(C_Item.GetItemIconByID(211878))
+        self.tex:SetTexture(C_Item.GetItemIconByID(POT_ID))
     end
 end)
 
 -- 4. Bag Watcher (Updates the icon if you use the item)
-local watcher = CreateFrame("Frame")
-watcher:RegisterEvent("BAG_UPDATE")
-watcher:SetScript("OnEvent", function()
-    if myAlert:IsShown() then
-        local hsCount = C_Item.GetItemCount(5512, false, true)
-        myAlert.tex:SetTexture(C_Item.GetItemIconByID(hsCount > 0 and 5512 or 211878))
+local lowHealthBagWatcher = CreateFrame("Frame")
+lowHealthBagWatcher:RegisterEvent("BAG_UPDATE")
+lowHealthBagWatcher:SetScript("OnEvent", function()
+    if lowHealthTracker:IsShown() then
+        local hsCount = C_Item.GetItemCount(HS_ID, false, true)
+        lowHealthTracker.tex:SetTexture(C_Item.GetItemIconByID(hsCount > 0 and HS_ID or POT_ID))
     end
 end)
