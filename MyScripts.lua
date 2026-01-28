@@ -232,149 +232,169 @@ end)
 
 --------------------------------- AutoPotion -----------------------------------------------
 --------------------------------------------------------------------------------------------
-local loader = CreateFrame("Frame")
-loader:RegisterEvent("PLAYER_LOGIN")
+-- local loader = CreateFrame("Frame")
+-- loader:RegisterEvent("PLAYER_LOGIN")
 
--- === CONFIGURATION ===
-local btnName  = "MultiBar6Button4" 
-local hsItem   = 5512 
-local potItem  = 211879 -- Algari Healing Potion
-local oocSpell = "Recuperate"     
+-- -- === CONFIGURATION ===
+-- local btnName  = "MultiBar6Button4" 
+-- local hsName   = "Healthstone"      
+-- local potName  = "Algari Healing Potion"
+-- local potId
+-- local hsItemID = 5512
 
--- === VISUAL UPDATER ===
-local function UpdateIcon(btn)
-    if not btn.VisualOverlay then return end
-    local inCombat = UnitAffectingCombat("player")
-    local step = tonumber(btn:GetAttribute("step")) or 1
+-- -- === VISUAL UPDATER ===
+-- local function UpdateIcon(btn)
+--     if not btn or not btn.VisualOverlay then return end
     
-    local currentID
-    if not inCombat then
-        btn.VisualOverlay.tex:SetTexture(btn.iconOOC)
-        currentID = nil -- We don't usually track stacks for a spell
-    elseif step == 2 then
-        btn.VisualOverlay.tex:SetTexture(btn.iconPot)
-        currentID = potItem
-    else
-        btn.VisualOverlay.tex:SetTexture(btn.iconHS)
-        currentID = hsItem
-    end
-
-    -- 1. UPDATE STACKS
-    if currentID then
-        local count = C_Item.GetItemCount(currentID)
-        btn.VisualOverlay.count:SetText(count > 1 and count or "")
-    else
-        btn.VisualOverlay.count:SetText("")
-    end
-
-    -- 2. UPDATE COOLDOWN
-    local start, duration
-    if not inCombat then
-        local spellInfo = C_Spell.GetSpellCooldown(oocSpell)
-        if spellInfo then start, duration = spellInfo.startTime, spellInfo.duration end
-    else
-        -- For items, use the ID directly
-        local itemID = (step == 2) and potItem or hsItem
-        start, duration = C_Item.GetItemCooldown(itemID)
-    end
+--     local step = tonumber(btn:GetAttribute("step")) or 1
     
-    if start and duration and duration > 0 then
-        btn.VisualOverlay.cooldown:SetCooldown(start, duration)
-        btn.VisualOverlay.cooldown:Show()
-    else
-        btn.VisualOverlay.cooldown:Hide()
-    end
-end
+--     -- 1. Texture and Count Logic
+--     if step == 2 then
+--         btn.VisualOverlay.tex:SetTexture(btn.iconPot)
+--         local potCount = C_Item.GetItemCount(potName)
+--         btn.VisualOverlay.count:SetText((potCount and potCount > 0) and potCount or "")
+--     else
+--         btn.VisualOverlay.tex:SetTexture(btn.iconHS)
+--         local hsCount = C_Item.GetItemCount(hsName, false, true)
+--         btn.VisualOverlay.count:SetText((hsCount and hsCount > 0) and hsCount or "")
+--     end
 
--- === SETUP VISUALS ===
-local function SetupOverlay(btn)
-    if btn.VisualOverlay then return end
+--     -- 2. Cooldown Logic
+--     -- Note: Potion CD check by name can be finicky, so we use a generic health potion ID for the CD swipe
+--     local cdID = (step == 2) and 211878 or hsItemID
+--     local start, duration = C_Item.GetItemCooldown(cdID)
     
-    -- The Container (We set this to HIGH so it beats the default button layers)
-    local f = CreateFrame("Frame", nil, btn) 
-    f:SetFrameStrata("HIGH") 
-    f:SetFrameLevel(btn:GetFrameLevel() + 10)
-    f:SetAllPoints(btn)
-    
-    -- The Icon Texture
-    local t = f:CreateTexture(nil, "BACKGROUND")
-    t:SetAllPoints(f)
-    
-    -- The Cooldown Swipe (Template-based)
-    local cd = CreateFrame("Cooldown", nil, f, "CooldownFrameTemplate")
-    cd:SetAllPoints(f)
-    cd:SetFrameLevel(f:GetFrameLevel() + 1)
-    
-    -- The Stack Count Text
-    local count = f:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
-    count:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -2, 2)
-    count:SetJustifyH("RIGHT")
+--     if start and duration and duration > 0 then
+--         btn.VisualOverlay.cooldown:SetCooldown(start, duration)
+--         btn.VisualOverlay.cooldown:Show()
+--     else
+--         btn.VisualOverlay.cooldown:Hide()
+--     end
+-- end
 
-    -- Cache textures
-    btn.iconHS  = C_Item.GetItemIconByID(hsItem) or 134414
-    btn.iconPot = C_Item.GetItemIconByID(potItem) or 537027
-    btn.iconOOC = C_Spell.GetSpellTexture(oocSpell) or 132274
+-- -- === SETUP VISUALS ===
+-- local function SetupOverlay(btn)
+--     if btn.VisualOverlay then return end
     
-    btn.VisualOverlay = f
-    btn.VisualOverlay.tex = t
-    btn.VisualOverlay.cooldown = cd
-    btn.VisualOverlay.count = count
-end
-
-loader:SetScript("OnEvent", function(self, event)
-    local btn = _G[btnName]
-    if not btn or event ~= "PLAYER_LOGIN" then return end
+--     local f = CreateFrame("Frame", nil, btn) 
+--     f:SetFrameStrata("HIGH") 
+--     f:SetFrameLevel(btn:GetFrameLevel() + 20)
+--     f:SetAllPoints(btn)
     
-    SetupOverlay(btn)
-    btn:RegisterForClicks("AnyDown", "AnyUp")
-
-    -- Binding Logic
-    ClearOverrideBindings(btn)
-    local key = GetBindingKey("MULTIACTIONBAR6BUTTON4") 
-    if key then SetOverrideBindingClick(btn, true, key, btnName, "LeftButton") end
-
-    -- Secure Puppeteer
-    local puppeteer = CreateFrame("Frame", nil, nil, "SecureHandlerStateTemplate")
-    puppeteer:SetFrameRef("MyButton", btn)
-    puppeteer:SetAttribute("_onstate-combatcheck", [[
-        self:GetFrameRef("MyButton"):SetAttribute("step", 1)
-    ]])
-    RegisterStateDriver(puppeteer, "combatcheck", "[combat] 1; 0")
-
-    -- Secure Click Logic
-    btn:SetAttribute("type", "macro")
-    local snippet = string.format([[
-        if not down then return end 
-        local inCombat = PlayerInCombat()
-        local step = tonumber(self:GetAttribute("step")) or 1
-        if inCombat then
-            if step == 1 then
-                self:SetAttribute("macrotext", "/use item:%s")
-                self:SetAttribute("step", 2)
-            else
-                self:SetAttribute("macrotext", "/use item:%s")
-                self:SetAttribute("step", 1)
-            end
-        else
-            self:SetAttribute("macrotext", "/cast %s")
-        end
-    ]], hsItem, potItem, oocSpell)
+--     local t = f:CreateTexture(nil, "OVERLAY")
+--     t:SetAllPoints(f)
     
-    SecureHandlerWrapScript(btn, "OnClick", btn, snippet)
+--     local cd = CreateFrame("Cooldown", nil, f, "CooldownFrameTemplate")
+--     cd:SetAllPoints(f)
+--     cd:SetFrameLevel(f:GetFrameLevel() + 1)
+    
+--     local count = f:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+--     count:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -2, 2)
 
-    -- Visual Bridge
-    btn:HookScript("OnAttributeChanged", function(self, name)
-        if name == "step" or name == "macrotext" then UpdateIcon(self) end
+--     -- Assign references safely
+--     btn.VisualOverlay = f
+--     f.tex = t
+--     f.cooldown = cd
+--     f.count = count
+
+--     -- Cache icons (Using IDs for icons is still best for performance)
+--     btn.iconHS  = C_Item.GetItemIconByID(hsItemID) or 134414
+--     btn.iconPot = C_Item.GetItemIconByID(211878) or 5931169
+-- end
+
+-- loader:SetScript("OnEvent", function(self, event)
+--     local btn = _G[btnName]
+--     if not btn then return end
+
+--     if event == "PLAYER_LOGIN" then
+--         SetupOverlay(btn)
+--         btn:RegisterForClicks("AnyDown", "AnyUp")
+        
+--         ClearOverrideBindings(btn)
+--         local key = GetBindingKey("MULTIACTIONBAR6BUTTON4") 
+--         if key then SetOverrideBindingClick(btn, true, key, btnName, "LeftButton") end
+
+--         -- 1. THE SECURE PUPPETEER (Reset on Combat Transition)
+--         local puppeteer = CreateFrame("Frame", nil, nil, "SecureHandlerStateTemplate")
+--         puppeteer:SetFrameRef("MyButton", btn)
+--         puppeteer:SetAttribute("_onstate-combatcheck", [[
+--             local btn = self:GetFrameRef("MyButton")
+--             btn:SetAttribute("step", 1)
+--         ]])
+--         RegisterStateDriver(puppeteer, "combatcheck", "[combat] 1; 0")
+
+--         -- 2. THE CLICK LOGIC (Infinite Cycle by Name)
+--         btn:SetAttribute("type", "macro")
+--         SecureHandlerWrapScript(btn, "OnClick", btn, string.format([[
+--             if not down then return end
+            
+--             local step = tonumber(self:GetAttribute("step")) or 1
+            
+--             if step == 1 then
+--                 self:SetAttribute("macrotext", "/use %s")
+--                 self:SetAttribute("step", 2)
+--             else
+--                 self:SetAttribute("macrotext", "/use %s")
+--                 self:SetAttribute("step", 1)
+--             end
+--         ]], hsName, potName))
+
+--         btn:HookScript("OnAttributeChanged", function(self, name)
+--             if name == "step" then UpdateIcon(self) end
+--         end)
+
+--         UpdateIcon(btn)
+--     else
+--         UpdateIcon(btn)
+--     end
+-- end)
+
+-- loader:RegisterEvent("BAG_UPDATE")
+-- loader:RegisterEvent("ACTIONBAR_UPDATE_COOLDOWN")
+-- loader:RegisterEvent("PLAYER_REGEN_ENABLED")
+-- loader:RegisterEvent("PLAYER_REGEN_DISABLED")
+
+-- 1. Create your alert frame (The Icon and Sound)
+local myAlert = CreateFrame("Frame", "MyHealingHijacker", UIParent)
+myAlert:SetSize(80, 80)
+myAlert:SetPoint("CENTER", 0, 0)
+myAlert.tex = myAlert:CreateTexture(nil, "OVERLAY")
+myAlert.tex:SetAllPoints()
+myAlert:Hide()
+
+-- 2. HIJACK THE BLIZZARD FRAME
+-- 'LowHealthFrame' is the red flashing edges. 
+-- We "Hook" into its OnShow and OnHide scripts.
+if LowHealthFrame then
+    -- When the red flash starts...
+    LowHealthFrame:HookScript("OnShow", function()
+        myAlert:Show()
+        -- PlaySound(3121, "Master")
+        PlaySoundFile("Interface\\AddOns\\MyScripts\\PowerAurasMedia\\Sounds\\Gasp.ogg", "Master")
     end)
 
-    -- Watch for cooldown and bag changes
-    local watcher = CreateFrame("Frame")
-    watcher:RegisterEvent("ACTIONBAR_UPDATE_COOLDOWN")
-    watcher:RegisterEvent("BAG_UPDATE")
-    watcher:RegisterEvent("PLAYER_REGEN_DISABLED")
-    watcher:RegisterEvent("PLAYER_REGEN_ENABLED")
-    watcher:SetScript("OnEvent", function() UpdateIcon(btn) end)
+    -- When the red flash stops...
+    LowHealthFrame:HookScript("OnHide", function()
+        myAlert:Hide()
+    end)
+end
 
-    btn:SetAttribute("step", 1)
-    UpdateIcon(btn)
+-- 3. Visuals: What icon to show?
+myAlert:SetScript("OnShow", function(self)
+    local hsCount = C_Item.GetItemCount(5512, false, true)
+    if hsCount > 0 then
+        self.tex:SetTexture(C_Item.GetItemIconByID(5512))
+    else
+        self.tex:SetTexture(C_Item.GetItemIconByID(211878))
+    end
+end)
+
+-- 4. Bag Watcher (Updates the icon if you use the item)
+local watcher = CreateFrame("Frame")
+watcher:RegisterEvent("BAG_UPDATE")
+watcher:SetScript("OnEvent", function()
+    if myAlert:IsShown() then
+        local hsCount = C_Item.GetItemCount(5512, false, true)
+        myAlert.tex:SetTexture(C_Item.GetItemIconByID(hsCount > 0 and 5512 or 211878))
+    end
 end)
