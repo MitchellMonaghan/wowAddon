@@ -1,0 +1,6 @@
+## Interface: 120000, 120001
+## Title: MyScripts
+## Notes: My custom macro scripts
+## Version: 1.0
+
+MyScripts.lua
