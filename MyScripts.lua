@@ -128,6 +128,7 @@ end)
 
 --------------------------------- PALADIN ------------------------------------------------
 ------------------------------------------------------------------------
+
 -- THE ULTIMATE REZ BUTTON (Class-Aware Version)
 ------------------------------------------------------------------------
 local oneButtonRezFrame = CreateFrame("Frame")
@@ -230,130 +231,6 @@ oneButtonRezFrame:SetScript("OnEvent", function()
     SecureHandlerWrapScript(btn, "OnClick", btn, preClick, postClick)
 end)
 
---------------------------------- AutoPotion -----------------------------------------------
---------------------------------------------------------------------------------------------
--- local loader = CreateFrame("Frame")
--- loader:RegisterEvent("PLAYER_LOGIN")
-
--- -- === CONFIGURATION ===
--- local btnName  = "MultiBar6Button4" 
--- local hsName   = "Healthstone"      
--- local potName  = "Algari Healing Potion"
--- local potId
--- local hsItemID = 5512
-
--- -- === VISUAL UPDATER ===
--- local function UpdateIcon(btn)
---     if not btn or not btn.VisualOverlay then return end
-    
---     local step = tonumber(btn:GetAttribute("step")) or 1
-    
---     -- 1. Texture and Count Logic
---     if step == 2 then
---         btn.VisualOverlay.tex:SetTexture(btn.iconPot)
---         local potCount = C_Item.GetItemCount(potName)
---         btn.VisualOverlay.count:SetText((potCount and potCount > 0) and potCount or "")
---     else
---         btn.VisualOverlay.tex:SetTexture(btn.iconHS)
---         local hsCount = C_Item.GetItemCount(hsName, false, true)
---         btn.VisualOverlay.count:SetText((hsCount and hsCount > 0) and hsCount or "")
---     end
-
---     -- 2. Cooldown Logic
---     -- Note: Potion CD check by name can be finicky, so we use a generic health potion ID for the CD swipe
---     local cdID = (step == 2) and 211878 or hsItemID
---     local start, duration = C_Item.GetItemCooldown(cdID)
-    
---     if start and duration and duration > 0 then
---         btn.VisualOverlay.cooldown:SetCooldown(start, duration)
---         btn.VisualOverlay.cooldown:Show()
---     else
---         btn.VisualOverlay.cooldown:Hide()
---     end
--- end
-
--- -- === SETUP VISUALS ===
--- local function SetupOverlay(btn)
---     if btn.VisualOverlay then return end
-    
---     local f = CreateFrame("Frame", nil, btn) 
---     f:SetFrameStrata("HIGH") 
---     f:SetFrameLevel(btn:GetFrameLevel() + 20)
---     f:SetAllPoints(btn)
-    
---     local t = f:CreateTexture(nil, "OVERLAY")
---     t:SetAllPoints(f)
-    
---     local cd = CreateFrame("Cooldown", nil, f, "CooldownFrameTemplate")
---     cd:SetAllPoints(f)
---     cd:SetFrameLevel(f:GetFrameLevel() + 1)
-    
---     local count = f:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
---     count:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -2, 2)
-
---     -- Assign references safely
---     btn.VisualOverlay = f
---     f.tex = t
---     f.cooldown = cd
---     f.count = count
-
---     -- Cache icons (Using IDs for icons is still best for performance)
---     btn.iconHS  = C_Item.GetItemIconByID(hsItemID) or 134414
---     btn.iconPot = C_Item.GetItemIconByID(211878) or 5931169
--- end
-
--- loader:SetScript("OnEvent", function(self, event)
---     local btn = _G[btnName]
---     if not btn then return end
-
---     if event == "PLAYER_LOGIN" then
---         SetupOverlay(btn)
---         btn:RegisterForClicks("AnyDown", "AnyUp")
-        
---         ClearOverrideBindings(btn)
---         local key = GetBindingKey("MULTIACTIONBAR6BUTTON4") 
---         if key then SetOverrideBindingClick(btn, true, key, btnName, "LeftButton") end
-
---         -- 1. THE SECURE PUPPETEER (Reset on Combat Transition)
---         local puppeteer = CreateFrame("Frame", nil, nil, "SecureHandlerStateTemplate")
---         puppeteer:SetFrameRef("MyButton", btn)
---         puppeteer:SetAttribute("_onstate-combatcheck", [[
---             local btn = self:GetFrameRef("MyButton")
---             btn:SetAttribute("step", 1)
---         ]])
---         RegisterStateDriver(puppeteer, "combatcheck", "[combat] 1; 0")
-
---         -- 2. THE CLICK LOGIC (Infinite Cycle by Name)
---         btn:SetAttribute("type", "macro")
---         SecureHandlerWrapScript(btn, "OnClick", btn, string.format([[
---             if not down then return end
-            
---             local step = tonumber(self:GetAttribute("step")) or 1
-            
---             if step == 1 then
---                 self:SetAttribute("macrotext", "/use %s")
---                 self:SetAttribute("step", 2)
---             else
---                 self:SetAttribute("macrotext", "/use %s")
---                 self:SetAttribute("step", 1)
---             end
---         ]], hsName, potName))
-
---         btn:HookScript("OnAttributeChanged", function(self, name)
---             if name == "step" then UpdateIcon(self) end
---         end)
-
---         UpdateIcon(btn)
---     else
---         UpdateIcon(btn)
---     end
--- end)
-
--- loader:RegisterEvent("BAG_UPDATE")
--- loader:RegisterEvent("ACTIONBAR_UPDATE_COOLDOWN")
--- loader:RegisterEvent("PLAYER_REGEN_ENABLED")
--- loader:RegisterEvent("PLAYER_REGEN_DISABLED")
-
 ------------------------------------------ Low Health Aura ---------------------------------
 --------------------------------------------------------------------------------------------
 local lowHealthTracker = CreateFrame("Frame", "MyHealingHijacker", UIParent)
@@ -440,3 +317,196 @@ lowHealthTracker:SetScript("OnEvent", function(self)
         RefreshSmartIcon(self)
     end
 end)
+
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+-- 1. CONFIGURATION
+local PALADIN_LIGHT_ID = 53563   -- Beacon of Light
+local PALADIN_FAITH_ID = 156910  -- Beacon of Faith
+local PALADIN_VIRTUE_ID = 200025 -- Beacon of Virtue (The "Disable" Switch)
+
+local SHAMAN_WATER_SHIELD_ID = 52127 -- Water Shield
+local SHAMAN_EARTH_SHIELD_ID = 974   -- Earth Shield (Ally)
+
+local _, class = UnitClass("player")
+if class ~= "PALADIN" and class ~= "SHAMAN" then return end
+
+print("|cff00ff00Buff Tracker Loaded:|r " .. class)
+
+-- 2. CREATE THE FRAME
+local container = CreateFrame("Frame", "MyMultiBeaconContainer", UIParent)
+container:SetSize(90, 40)
+container:SetPoint("CENTER", 100, 0)
+container:Hide()
+
+local icon1 = container:CreateTexture(nil, "OVERLAY")
+icon1:SetSize(40, 40)
+icon1:SetPoint("LEFT", 0, 0)
+
+local icon2 = container:CreateTexture(nil, "OVERLAY")
+icon2:SetSize(40, 40)
+icon2:SetPoint("LEFT", 45, 0) 
+
+-- 3. HELPER: DYNAMIC TEXTURE LOADER
+local function UpdateTextures()
+    if class == "PALADIN" then
+        -- If Virtue is selected, we don't really care about textures because we hide everything.
+        -- But for safety, we default to Light/Faith textures.
+        icon1:SetTexture(C_Spell.GetSpellTexture(PALADIN_LIGHT_ID))
+        icon2:SetTexture(C_Spell.GetSpellTexture(PALADIN_FAITH_ID))
+        
+    elseif class == "SHAMAN" then
+        icon1:SetTexture(C_Spell.GetSpellTexture(SHAMAN_WATER_SHIELD_ID))
+        icon2:SetTexture(C_Spell.GetSpellTexture(SHAMAN_EARTH_SHIELD_ID))
+    end
+end
+
+-- 4. THE SCANNER
+local function UpdateState()
+    -- Safety: Combat Lock
+    if InCombatLockdown() then 
+        container:Hide()
+        return 
+    end
+
+    -- === SHAMAN LOGIC ===
+    if class == "SHAMAN" then
+        local hasWaterShield = false
+        local hasAllyShield = false
+        local isSolo = not IsInGroup()
+
+        -- A: CHECK SELF (Water Shield)
+        for i = 1, 40 do
+            local data = C_UnitAuras.GetBuffDataByIndex("player", i)
+            if not data then break end
+            
+            if data.spellId == SHAMAN_WATER_SHIELD_ID and data.sourceUnit == "player" then
+                hasWaterShield = true
+                break
+            end
+        end
+
+        -- B: CHECK OTHERS (Earth Shield)
+        if isSolo then
+            hasAllyShield = true 
+            icon2:Hide() 
+        else
+            local units = {}
+            local prefix = IsInRaid() and "raid" or "party"
+            local count = IsInRaid() and GetNumGroupMembers() or GetNumSubgroupMembers()
+            for i = 1, count do table.insert(units, prefix..i) end
+
+            for _, unit in ipairs(units) do
+                if UnitExists(unit) and not UnitIsUnit(unit, "player") then
+                    for i = 1, 40 do
+                        local data = C_UnitAuras.GetBuffDataByIndex(unit, i)
+                        if not data then break end
+                        if data.spellId == SHAMAN_EARTH_SHIELD_ID and data.sourceUnit == "player" then
+                            hasAllyShield = true
+                            break
+                        end
+                    end
+                end
+                if hasAllyShield then break end
+            end
+            if hasAllyShield then icon2:Hide() else icon2:Show() end
+        end
+
+        if hasWaterShield then icon1:Hide() else icon1:Show() end
+        if hasWaterShield and hasAllyShield then container:Hide() else container:Show() end
+
+
+    -- === PALADIN LOGIC ===
+    elseif class == "PALADIN" then
+        
+        -- TALENT CHECK: VIRTUE
+        -- If we have Beacon of Virtue, we STOP here. 
+        -- Virtue is not a maintenance buff, so we hide the tracker entirely.
+        if IsPlayerSpell(PALADIN_VIRTUE_ID) then
+            container:Hide()
+            return
+        end
+
+        -- Standard Logic for Light / Faith
+        local hasLight = false  
+        local hasFaith = false  
+        local knowsFaith = IsPlayerSpell(PALADIN_FAITH_ID)
+        
+        local units = {"player"}
+        if IsInGroup() then
+            local prefix = IsInRaid() and "raid" or "party"
+            local count = IsInRaid() and GetNumGroupMembers() or GetNumSubgroupMembers()
+            for i = 1, count do table.insert(units, prefix..i) end
+        end
+
+        for _, unit in ipairs(units) do
+            if UnitExists(unit) then
+                for i = 1, 40 do
+                    local data = C_UnitAuras.GetBuffDataByIndex(unit, i)
+                    if not data then break end
+                    
+                    if data.sourceUnit == "player" then
+                        -- We only check for standard Light here, since Virtue is handled above
+                        if data.spellId == PALADIN_LIGHT_ID then
+                            hasLight = true
+                        end
+                        if data.spellId == PALADIN_FAITH_ID then
+                            hasFaith = true
+                        end
+                    end
+                end
+            end
+            if hasLight and (hasFaith or not knowsFaith) then break end 
+        end
+
+        if hasLight then icon1:Hide() else icon1:Show() end
+        
+        if knowsFaith then
+            icon2:Show()
+            if hasFaith then icon2:Hide() end
+        else
+            icon2:Hide() 
+        end
+
+        local lightDone = hasLight
+        local faithDone = (not knowsFaith) or hasFaith
+        if lightDone and faithDone then container:Hide() else container:Show() end
+    end
+end
+
+-- 5. EVENTS
+local updateQueued = false
+local function RequestUpdate()
+    if updateQueued then return end
+    updateQueued = true
+    C_Timer.After(0.1, function()
+        UpdateState()
+        updateQueued = false
+    end)
+end
+
+container:RegisterEvent("UNIT_AURA")
+container:RegisterEvent("PLAYER_ENTERING_WORLD")
+container:RegisterEvent("GROUP_ROSTER_UPDATE")
+container:RegisterEvent("PLAYER_REGEN_ENABLED")
+container:RegisterEvent("PLAYER_REGEN_DISABLED")
+container:RegisterEvent("PLAYER_TALENT_UPDATE") 
+
+container:SetScript("OnEvent", function(self, event, unit)
+    if event == "PLAYER_REGEN_DISABLED" then
+        self:Hide()
+    elseif event == "PLAYER_TALENT_UPDATE" or event == "PLAYER_ENTERING_WORLD" then
+        UpdateTextures()
+        RequestUpdate()
+    elseif event == "UNIT_AURA" then
+        if unit and (unit == "player" or unit:find("party") or unit:find("raid")) then
+            RequestUpdate()
+        end
+    else
+        RequestUpdate()
+    end
+end)
+
+-- 6. INITIALIZATION
+UpdateTextures()
+RequestUpdate()
