@@ -1,26 +1,4 @@
-------------------------------------------------------------------------
--- HELPER: TTS FUNCTION
-------------------------------------------------------------------------
-local function Speak(text)
-    local voice = TextToSpeech_GetSelectedVoice(Enum.TtsVoiceType.Standard)
-    if not voice then return end
-    TextToSpeech_Speak(text, voice)
-end
-
-local function PlaySmartSound(soundData)
-    if not soundData then return end
-
-    local t = type(soundData)
-    
-    if t == "number" then
-        -- It's a Blizzard Sound ID
-        PlaySound(soundData, "Master")
-        
-    elseif t == "string" then
-        -- It's a File Path
-        PlaySoundFile(soundData, "Master")
-    end
-end
+local _, ns = ...
 
 -- Healing Stream Tracking --
 local hstTracker = CreateFrame("Frame")
@@ -57,9 +35,7 @@ hstTracker:SetScript("OnEvent", function(self, event, unit, castGUID, spellID)
         -- Schedule the new sound
         if delay > 0 then
             hstTimerHandle = C_Timer.NewTimer(delay, function()
-                -- PlaySound(12891, "Master")
-                -- print("|cff00ff00Totem Capping in 3s!|r") -- Uncomment to verify visual 
-                Speak("Healing Stream")
+                ns.Speak("Healing Stream")
             end)
         end
     end
@@ -93,12 +69,7 @@ local function UpdateRipTimer()
     -- Schedule the new sound if the target time is in the future
     if delay > 0 then
         ripTimerHandle = C_Timer.NewTimer(delay, function()
-            -- You might want a different sound for Riptide to distinguish it from Totem
-            -- 11466 = Ding. 567476 = Tick.
-            -- PlaySound(7308, "Master")
-            -- PlaySoundFile("Interface\\AddOns\\SharedMedia_Causese\\sound\\FILENAME.ogg", "Master") 
-            Speak("Riptide")
-            -- print("|cff00ffffRiptide Ready in 3s!|r") 
+            ns.Speak("Riptide")
         end)
     end
 end
@@ -158,13 +129,11 @@ oneButtonRezFrame:SetScript("OnEvent", function()
         spellNormal = "Redemption"
         spellCombat = "Intercession"
         spellMass   = "Absolution"
-        print("|cff00ff00[MyScripts] Rez Logic: Paladin Mode Loaded|r")
         
     elseif class == "SHAMAN" then
         spellNormal = "Ancestral Spirit"
         spellCombat = "Ancestral Spirit" -- Shamans have no targetable B-Rez
         spellMass   = "Ancestral Vision"
-        print("|cff00ff00[MyScripts] Rez Logic: Shaman Mode Loaded|r")
         
     else
         -- If not Paladin or Shaman, stop here so we don't break the button.
@@ -176,7 +145,6 @@ oneButtonRezFrame:SetScript("OnEvent", function()
     local btn = _G[btnName]
     
     if not btn then 
-        print("|cffff0000[MyScripts] Error: Could not find " .. btnName .. "|r")
         return 
     end
 
@@ -246,93 +214,6 @@ oneButtonRezFrame:SetScript("OnEvent", function()
     SecureHandlerWrapScript(btn, "OnClick", btn, preClick, postClick)
 end)
 
------------------------------------------- Low Health Aura ---------------------------------
---------------------------------------------------------------------------------------------
-local lowHealthTracker = CreateFrame("Frame", "MyHealingHijacker", UIParent)
-lowHealthTracker:SetSize(80, 80)
-lowHealthTracker:SetPoint("CENTER", 0, 0)
-lowHealthTracker.tex = lowHealthTracker:CreateTexture(nil, "OVERLAY")
-lowHealthTracker.tex:SetAllPoints()
-lowHealthTracker:Hide()
-
-local HS_ID    = 5512
-local POT_NAME = "Algari Healing Potion"
-local POT_SPELL_ID = 431416
-
-local function GetPotionData()
-    -- We scan the bags for any item that matches our Spell ID
-    for bag = 0, 4 do
-        for slot = 1, C_Container.GetContainerNumSlots(bag) do
-            local itemID = C_Container.GetContainerItemID(bag, slot)
-            if itemID then
-                local spellName, spellID = C_Item.GetItemSpell(itemID)
-                if spellID == POT_SPELL_ID then
-                    local count = C_Item.GetItemCount(itemID)
-                    local start, duration = C_Item.GetItemCooldown(itemID)
-                    -- print("|cff00ff00[MyScripts]|r PotionDuration:", duration)
-                    -- Return the first match found (highest rank usually first in bags)
-                    return count, (duration or 0) == 0, C_Item.GetItemIconByID(itemID)
-                end
-            end
-        end
-    end
-    return 0, false, nil
-end
-
--- === THE STABILIZED CHECK ===
-local function RefreshSmartIcon(self)
-    local hsCount = C_Item.GetItemCount(HS_ID, false, true)
-    local isHSUsable = C_Item.IsUsableItem(HS_ID)
-    
-    -- 2. Check Potion (Scanner finds any rank)
-    local potCount, isPotReady, potIcon = GetPotionData()
-
-    -- === DIAGNOSTIC LOGS ===
-    -- print("|cff00ff00[MyScripts]|r Healthstone:", hsCount, "Usable:", tostring(isHSUsable))
-    -- print("|cff00ff00[MyScripts]|r Potion Count:", potCount, "Ready:", tostring(isPotReady))
-
-    -- 1. Determine priority and set texture
-    if hsCount > 0 and isHSUsable then
-        self.tex:SetTexture(C_Item.GetItemIconByID(HS_ID))
-        self:SetAlpha(1)
-        -- print("|cff00ff00[MyScripts]|r Visuals: Showing Healthstone")
-        return true
-    elseif isPotReady then
-        self.tex:SetTexture(potIcon)
-        self:SetAlpha(1)
-        -- print("|cff00ff00[MyScripts]|r Visuals: Showing Potion")
-        return true
-    else
-        -- If neither is ready, we stay "Active" but invisible
-        self:SetAlpha(0)
-        -- print("|cff00ff00[MyScripts]|r Visuals: Hiding (Nothing ready)")
-        return false
-    end
-end
-
-if LowHealthFrame then
-    LowHealthFrame:HookScript("OnShow", function()
-        -- print("|cff00ff00[MyScripts]|r LowHealthFrame Triggered!")
-        local hasHeal = RefreshSmartIcon(lowHealthTracker)
-        lowHealthTracker:Show()
-        PlaySmartSound("Interface\\AddOns\\MyScripts\\PowerAurasMedia\\Sounds\\Gasp.ogg")
-    end)
-
-    LowHealthFrame:HookScript("OnHide", function()
-        -- print("|cff00ff00[MyScripts]|r LowHealthFrame Hidden")
-        lowHealthTracker:Hide()
-    end)
-end
-
--- Watchers to update the icon while the alert is already on-screen
-lowHealthTracker:RegisterEvent("BAG_UPDATE")
-lowHealthTracker:RegisterEvent("ACTIONBAR_UPDATE_COOLDOWN")
-lowHealthTracker:SetScript("OnEvent", function(self)
-    if self:IsShown() then
-        RefreshSmartIcon(self)
-    end
-end)
-
 ------------------------------------------------------------------------------------
 ------------------------------------------------------------------------------------
 -- 1. CONFIGURATION
@@ -345,8 +226,6 @@ local SHAMAN_EARTH_SHIELD_ID = 974   -- Earth Shield (Ally)
 
 local _, class = UnitClass("player")
 if class ~= "PALADIN" and class ~= "SHAMAN" then return end
-
-print("|cff00ff00Buff Tracker Loaded:|r " .. class)
 
 -- 2. CREATE THE FRAME
 local classBuffReminderTracker = CreateFrame("Frame", "MyMultiBeaconContainer", UIParent)
@@ -525,77 +404,3 @@ end)
 -- 6. INITIALIZATION
 UpdateTextures()
 RequestUpdate()
-
------------------------------------------------------------ LUST TRACKER ----------------------------------------------------
------------------------------------------------------------------------------------------------------------------------------
--- 1. CONFIGURATION
--- Thresholds (% Haste Jump)
-local THRESHOLD_LUST = 28.0 
-local THRESHOLD_PI   = 14.0 
-
--- AUDIO CONFIGURATION
--- You can put a Number (ID) OR a String (File Path) here.
--- Examples:
--- Number: 12867 (Raid Warning)
--- String: "Interface\\AddOns\\MyScripts\\sounds\\lust.ogg"
-
-local SOUND_LUST = 12867  -- Currently set to Raid Warning (Alarm)
-local SOUND_PI   = 12865  -- Currently set to Quest Complete (Ding)
-
--- 3. CREATE THE WATCHER
-local lustAndPowerInfusionTracker = CreateFrame("Frame", "MyHasteAnalyzer", UIParent)
-lustAndPowerInfusionTracker:Hide()
-
--- 4. THE ANALYZER
-local lastHaste = 0
-local timer = 0
-
-lustAndPowerInfusionTracker:SetScript("OnUpdate", function(self, elapsed)
-    timer = timer + elapsed
-    if timer < 0.1 then return end -- Check 10x per second
-    timer = 0
-
-    -- Get current Haste %
-    local currentHaste = UnitSpellHaste("player")
-    
-    -- Calculate the Spike
-    -- We only care if haste went UP (positive delta)
-    local delta = currentHaste - lastHaste
-
-    -- Filter out tiny fluctuations (trinket ramp-ups, etc)
-    if lastHaste > 0 and delta > 2.0 then
-        
-        -- PRIORITY 1: LUST (+30%)
-        if delta >= THRESHOLD_LUST then
-            print("|cffFF0000[MyScripts] LUST DETECTED! (+"..string.format("%.1f", delta).."%)|r")
-            PlaySmartSound(SOUND_LUST)
-            
-        -- PRIORITY 2: POWER INFUSION (+20-25%)
-        elseif delta >= THRESHOLD_PI then
-            print("|cffFFFF00[MyScripts] PI DETECTED! (+"..string.format("%.1f", delta).."%)|r")
-            PlaySmartSound(SOUND_PI)
-        end
-    end
-
-    -- Update history
-    lastHaste = currentHaste
-end)
-
--- 5. COMBAT STATE MANAGEMENT
-lustAndPowerInfusionTracker:RegisterEvent("PLAYER_REGEN_DISABLED")
-lustAndPowerInfusionTracker:RegisterEvent("PLAYER_REGEN_ENABLED")
-lustAndPowerInfusionTracker:RegisterEvent("PLAYER_ENTERING_WORLD")
-
-lustAndPowerInfusionTracker:SetScript("OnEvent", function(self, event)
-    if event == "PLAYER_REGEN_DISABLED" then
-        -- Snapshot current haste so we don't trigger on the moment combat starts
-        lastHaste = UnitSpellHaste("player") 
-        self:Show()
-    elseif event == "PLAYER_REGEN_ENABLED" then
-        self:Hide()
-    elseif event == "PLAYER_ENTERING_WORLD" then
-        self:Hide()
-    end
-end)
-
-print("|cff00ff00Haste Pulse Monitor Loaded|r")

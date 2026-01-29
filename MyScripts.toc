@@ -3,4 +3,21 @@
 ## Notes: My custom macro scripts
 ## Version: 1.0
 
+Core.lua
+
+## Features
+## Generic
 MyScripts.lua
+Modules\DeathNotification.lua
+Modules\LowHealth.lua
+Modules\LustNotification.lua
+
+## Modules\Paladin\BeaconReminder.lua
+## Modules\Paladin\BeaconReminder.lua
+## Modules\Paladin\BeaconReminder.lua
+
+## Paladin
+
+## Shaman
+
+## Warlock
