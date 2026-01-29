@@ -7,6 +7,21 @@ local function Speak(text)
     TextToSpeech_Speak(text, voice)
 end
 
+local function PlaySmartSound(soundData)
+    if not soundData then return end
+
+    local t = type(soundData)
+    
+    if t == "number" then
+        -- It's a Blizzard Sound ID
+        PlaySound(soundData, "Master")
+        
+    elseif t == "string" then
+        -- It's a File Path
+        PlaySoundFile(soundData, "Master")
+    end
+end
+
 -- Healing Stream Tracking --
 local hstTracker = CreateFrame("Frame")
 hstTracker:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
@@ -300,7 +315,7 @@ if LowHealthFrame then
         -- print("|cff00ff00[MyScripts]|r LowHealthFrame Triggered!")
         local hasHeal = RefreshSmartIcon(lowHealthTracker)
         lowHealthTracker:Show()
-        PlaySoundFile("Interface\\AddOns\\MyScripts\\PowerAurasMedia\\Sounds\\Gasp.ogg", "Master")
+        PlaySmartSound("Interface\\AddOns\\MyScripts\\PowerAurasMedia\\Sounds\\Gasp.ogg")
     end)
 
     LowHealthFrame:HookScript("OnHide", function()
@@ -334,16 +349,16 @@ if class ~= "PALADIN" and class ~= "SHAMAN" then return end
 print("|cff00ff00Buff Tracker Loaded:|r " .. class)
 
 -- 2. CREATE THE FRAME
-local container = CreateFrame("Frame", "MyMultiBeaconContainer", UIParent)
-container:SetSize(90, 40)
-container:SetPoint("CENTER", 100, 0)
-container:Hide()
+local classBuffReminderTracker = CreateFrame("Frame", "MyMultiBeaconContainer", UIParent)
+classBuffReminderTracker:SetSize(90, 40)
+classBuffReminderTracker:SetPoint("CENTER", 100, 0)
+classBuffReminderTracker:Hide()
 
-local icon1 = container:CreateTexture(nil, "OVERLAY")
+local icon1 = classBuffReminderTracker:CreateTexture(nil, "OVERLAY")
 icon1:SetSize(40, 40)
 icon1:SetPoint("LEFT", 0, 0)
 
-local icon2 = container:CreateTexture(nil, "OVERLAY")
+local icon2 = classBuffReminderTracker:CreateTexture(nil, "OVERLAY")
 icon2:SetSize(40, 40)
 icon2:SetPoint("LEFT", 45, 0) 
 
@@ -365,7 +380,7 @@ end
 local function UpdateState()
     -- Safety: Combat Lock
     if InCombatLockdown() then 
-        container:Hide()
+        classBuffReminderTracker:Hide()
         return 
     end
 
@@ -413,7 +428,7 @@ local function UpdateState()
         end
 
         if hasWaterShield then icon1:Hide() else icon1:Show() end
-        if hasWaterShield and hasAllyShield then container:Hide() else container:Show() end
+        if hasWaterShield and hasAllyShield then classBuffReminderTracker:Hide() else classBuffReminderTracker:Show() end
 
 
     -- === PALADIN LOGIC ===
@@ -423,7 +438,7 @@ local function UpdateState()
         -- If we have Beacon of Virtue, we STOP here. 
         -- Virtue is not a maintenance buff, so we hide the tracker entirely.
         if IsPlayerSpell(PALADIN_VIRTUE_ID) then
-            container:Hide()
+            classBuffReminderTracker:Hide()
             return
         end
 
@@ -470,7 +485,7 @@ local function UpdateState()
 
         local lightDone = hasLight
         local faithDone = (not knowsFaith) or hasFaith
-        if lightDone and faithDone then container:Hide() else container:Show() end
+        if lightDone and faithDone then classBuffReminderTracker:Hide() else classBuffReminderTracker:Show() end
     end
 end
 
@@ -485,14 +500,14 @@ local function RequestUpdate()
     end)
 end
 
-container:RegisterEvent("UNIT_AURA")
-container:RegisterEvent("PLAYER_ENTERING_WORLD")
-container:RegisterEvent("GROUP_ROSTER_UPDATE")
-container:RegisterEvent("PLAYER_REGEN_ENABLED")
-container:RegisterEvent("PLAYER_REGEN_DISABLED")
-container:RegisterEvent("PLAYER_TALENT_UPDATE") 
+classBuffReminderTracker:RegisterEvent("UNIT_AURA")
+classBuffReminderTracker:RegisterEvent("PLAYER_ENTERING_WORLD")
+classBuffReminderTracker:RegisterEvent("GROUP_ROSTER_UPDATE")
+classBuffReminderTracker:RegisterEvent("PLAYER_REGEN_ENABLED")
+classBuffReminderTracker:RegisterEvent("PLAYER_REGEN_DISABLED")
+classBuffReminderTracker:RegisterEvent("PLAYER_TALENT_UPDATE") 
 
-container:SetScript("OnEvent", function(self, event, unit)
+classBuffReminderTracker:SetScript("OnEvent", function(self, event, unit)
     if event == "PLAYER_REGEN_DISABLED" then
         self:Hide()
     elseif event == "PLAYER_TALENT_UPDATE" or event == "PLAYER_ENTERING_WORLD" then
@@ -510,3 +525,77 @@ end)
 -- 6. INITIALIZATION
 UpdateTextures()
 RequestUpdate()
+
+----------------------------------------------------------- LUST TRACKER ----------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------
+-- 1. CONFIGURATION
+-- Thresholds (% Haste Jump)
+local THRESHOLD_LUST = 28.0 
+local THRESHOLD_PI   = 14.0 
+
+-- AUDIO CONFIGURATION
+-- You can put a Number (ID) OR a String (File Path) here.
+-- Examples:
+-- Number: 12867 (Raid Warning)
+-- String: "Interface\\AddOns\\MyScripts\\sounds\\lust.ogg"
+
+local SOUND_LUST = 12867  -- Currently set to Raid Warning (Alarm)
+local SOUND_PI   = 12865  -- Currently set to Quest Complete (Ding)
+
+-- 3. CREATE THE WATCHER
+local lustAndPowerInfusionTracker = CreateFrame("Frame", "MyHasteAnalyzer", UIParent)
+lustAndPowerInfusionTracker:Hide()
+
+-- 4. THE ANALYZER
+local lastHaste = 0
+local timer = 0
+
+lustAndPowerInfusionTracker:SetScript("OnUpdate", function(self, elapsed)
+    timer = timer + elapsed
+    if timer < 0.1 then return end -- Check 10x per second
+    timer = 0
+
+    -- Get current Haste %
+    local currentHaste = UnitSpellHaste("player")
+    
+    -- Calculate the Spike
+    -- We only care if haste went UP (positive delta)
+    local delta = currentHaste - lastHaste
+
+    -- Filter out tiny fluctuations (trinket ramp-ups, etc)
+    if lastHaste > 0 and delta > 2.0 then
+        
+        -- PRIORITY 1: LUST (+30%)
+        if delta >= THRESHOLD_LUST then
+            print("|cffFF0000[MyScripts] LUST DETECTED! (+"..string.format("%.1f", delta).."%)|r")
+            PlaySmartSound(SOUND_LUST)
+            
+        -- PRIORITY 2: POWER INFUSION (+20-25%)
+        elseif delta >= THRESHOLD_PI then
+            print("|cffFFFF00[MyScripts] PI DETECTED! (+"..string.format("%.1f", delta).."%)|r")
+            PlaySmartSound(SOUND_PI)
+        end
+    end
+
+    -- Update history
+    lastHaste = currentHaste
+end)
+
+-- 5. COMBAT STATE MANAGEMENT
+lustAndPowerInfusionTracker:RegisterEvent("PLAYER_REGEN_DISABLED")
+lustAndPowerInfusionTracker:RegisterEvent("PLAYER_REGEN_ENABLED")
+lustAndPowerInfusionTracker:RegisterEvent("PLAYER_ENTERING_WORLD")
+
+lustAndPowerInfusionTracker:SetScript("OnEvent", function(self, event)
+    if event == "PLAYER_REGEN_DISABLED" then
+        -- Snapshot current haste so we don't trigger on the moment combat starts
+        lastHaste = UnitSpellHaste("player") 
+        self:Show()
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        self:Hide()
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        self:Hide()
+    end
+end)
+
+print("|cff00ff00Haste Pulse Monitor Loaded|r")
