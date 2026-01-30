@@ -1,3 +1,5 @@
+local _, ns = ...
+
 local deathTracker = CreateFrame("Frame")
 local dead = {} -- [unit] = true/false (last known)
 
