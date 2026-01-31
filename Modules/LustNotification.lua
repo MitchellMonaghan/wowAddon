@@ -9,7 +9,7 @@ MyHasteFrame.baseline = 0
 MyHasteFrame:SetScript("OnEvent", function(self, event, unit)
     if event == "PLAYER_REGEN_DISABLED" then
         self.baseline = UnitSpellHaste("player")
-        ns.Print("Monitor Active.")
+        -- ns.Print("Monitor Active.")
         return
     end
 
