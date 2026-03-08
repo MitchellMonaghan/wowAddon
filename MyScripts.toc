@@ -2,6 +2,7 @@
 ## Title: MyScripts
 ## Notes: My custom macro scripts
 ## Version: 1.0
+## SavedVariables: MyScriptsDB
 
 ## Libraries
 Libs\LibStub\LibStub.lua
@@ -13,7 +14,6 @@ Libs\Ace3_Libs\AceTimer-3.0\AceTimer-3.0.lua
 Core.lua
 
 ## Generic
-Modules\AssistNextIcon.lua
 
 ## Paladin
 Modules\Paladin\General\OneButtonRez.lua
