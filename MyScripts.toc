@@ -13,6 +13,7 @@ Libs\Ace3_Libs\AceTimer-3.0\AceTimer-3.0.lua
 Core.lua
 
 ## Generic
+Modules\AssistNextIcon.lua
 
 ## Paladin
 Modules\Paladin\General\OneButtonRez.lua
@@ -23,7 +24,6 @@ Modules\Shaman\Restoration\HealingStreamTracker.lua
 ## Modules\Shaman\Restoration\RiptideTracker.lua
 
 ## Shaman - Elemental
-Modules\Shaman\Elemental\MaelstromSpendReminder.lua
 Modules\Shaman\Elemental\BuffReminder.lua
 
 ## Shaman - General
