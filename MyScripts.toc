@@ -3,19 +3,30 @@
 ## Notes: My custom macro scripts
 ## Version: 1.0
 
+## Libraries
+Libs\LibStub\LibStub.lua
+Libs\Ace3_Libs\AceAddon-3.0\AceAddon-3.0.lua
+Libs\Ace3_Libs\AceEvent-3.0\AceEvent-3.0.lua
+Libs\Ace3_Libs\AceTimer-3.0\AceTimer-3.0.lua
+
+## Core
 Core.lua
 
-## Features
 ## Generic
-MyScripts.lua
-Modules\LustNotification.lua
-
-## Modules\Paladin\BeaconReminder.lua
-## Modules\Paladin\BeaconReminder.lua
-## Modules\Paladin\BeaconReminder.lua
 
 ## Paladin
+Modules\Paladin\General\OneButtonRez.lua
+Modules\Paladin\General\AuraReminder.lua
 
-## Shaman
+## Shaman - Restoration
+Modules\Shaman\Restoration\HealingStreamTracker.lua
+## Modules\Shaman\Restoration\RiptideTracker.lua
+
+## Shaman - Elemental
+Modules\Shaman\Elemental\MaelstromSpendReminder.lua
+Modules\Shaman\Elemental\BuffReminder.lua
+
+## Shaman - General
+Modules\Shaman\General\OneButtonRez.lua
 
 ## Warlock
