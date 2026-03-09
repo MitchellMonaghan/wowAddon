@@ -17,14 +17,12 @@ Core.lua
 
 ## Paladin
 Modules\Paladin\General\OneButtonRez.lua
-Modules\Paladin\General\AuraReminder.lua
 
 ## Shaman - Restoration
 Modules\Shaman\Restoration\HealingStreamTracker.lua
 Modules\Shaman\Restoration\EarthShieldTankReminder.lua
 
 ## Shaman - Elemental
-Modules\Shaman\Elemental\BuffReminder.lua
 
 ## Shaman - General
 Modules\Shaman\General\OneButtonRez.lua
