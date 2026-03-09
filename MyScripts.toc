@@ -20,7 +20,6 @@ Modules\Paladin\General\OneButtonRez.lua
 
 ## Shaman - Restoration
 Modules\Shaman\Restoration\HealingStreamTracker.lua
-Modules\Shaman\Restoration\EarthShieldTankReminder.lua
 
 ## Shaman - Elemental
 
