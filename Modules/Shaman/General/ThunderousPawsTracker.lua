@@ -49,7 +49,7 @@ border:SetVertexColor(0, 0, 0, 1)
 
 local timerText = frame:CreateFontString(nil, "OVERLAY", nil, 7)
 
-timerText:SetFont(FONT_PATH, 16, "OUTLINE") 
+timerText:SetFont(FONT_PATH, 14, "OUTLINE") 
 timerText:SetPoint("CENTER", frame, "CENTER", 0, 0)
 timerText:SetTextColor(1, 1, 1, 1)
 
