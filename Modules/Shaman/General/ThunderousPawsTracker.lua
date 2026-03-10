@@ -2,18 +2,36 @@ local _, ns = ...
 
 if select(2, UnitClass("player")) ~= "SHAMAN" then return end
 
-local THUNDEROUS_PAWS_ID = 378075
+local THUNDEROUS_PAWS_TALENT_ID = 378075
+local THUNDEROUS_PAWS_BUFF_ID = 378076
 local THUNDEROUS_PAWS_NAME = "Thunderous Paws"
 local COOLDOWN_SECONDS = 20
 
 local thunderousPawsID = nil
 local buffWasActive = false
 local cooldownEndsAt = 0
+local isAnchoredToECME = false
 
 local frame = CreateFrame("Frame", nil, UIParent)
 frame:SetSize(40, 40)
 frame:SetPoint("CENTER", UIParent, "CENTER", 0, -120)
 frame:SetFrameStrata("HIGH")
+
+local function TryAnchorToECMEBuffs()
+    if isAnchoredToECME then
+        return true
+    end
+
+    local anchor = _G.ECME_CDMBar_buffs
+    if not anchor then
+        return false
+    end
+
+    frame:ClearAllPoints()
+    frame:SetPoint("LEFT", anchor, "RIGHT", 8, 0)
+    isAnchoredToECME = true
+    return true
+end
 
 local bg = frame:CreateTexture(nil, "BACKGROUND")
 bg:SetAllPoints()
@@ -39,7 +57,7 @@ border:SetBackdrop({
 border:SetBackdropBorderColor(0.08, 0.08, 0.08, 1)
 
 local function ResolveThunderousPawsID()
-    thunderousPawsID = THUNDEROUS_PAWS_ID
+    thunderousPawsID = THUNDEROUS_PAWS_TALENT_ID
 end
 
 local function GetSpellTextureSafe(spellID, fallbackName)
@@ -81,14 +99,14 @@ local function GetBuffData()
     ResolveThunderousPawsID()
 
     if thunderousPawsID and AuraUtil and AuraUtil.FindAuraBySpellID then
-        local aura = AuraUtil.FindAuraBySpellID(thunderousPawsID, "player", "HELPFUL")
+        local aura = AuraUtil.FindAuraBySpellID(THUNDEROUS_PAWS_BUFF_ID, "player", "HELPFUL")
         if aura then
             return aura
         end
     end
 
     if thunderousPawsID and C_UnitAuras and C_UnitAuras.GetAuraDataBySpellID then
-        local aura = C_UnitAuras.GetAuraDataBySpellID("player", thunderousPawsID)
+        local aura = C_UnitAuras.GetAuraDataBySpellID("player", THUNDEROUS_PAWS_BUFF_ID)
         if aura then
             return aura
         end
@@ -99,19 +117,6 @@ local function GetBuffData()
         if ok and mappedAuraID then
             local aura = C_UnitAuras.GetAuraDataBySpellID("player", mappedAuraID)
             if aura then
-                return aura
-            end
-        end
-    end
-
-    if C_UnitAuras and C_UnitAuras.GetBuffDataByIndex then
-        for i = 1, 80 do
-            local aura = C_UnitAuras.GetBuffDataByIndex("player", i)
-            if not aura then
-                break
-            end
-
-            if aura.name == THUNDEROUS_PAWS_NAME then
                 return aura
             end
         end
@@ -177,9 +182,11 @@ end
 ResolveThunderousPawsID()
 icon:SetTexture(GetSpellTextureSafe(thunderousPawsID, THUNDEROUS_PAWS_NAME))
 frame:Show()
+TryAnchorToECMEBuffs()
 
 local driver = CreateFrame("Frame")
 driver:RegisterEvent("PLAYER_ENTERING_WORLD")
+driver:RegisterEvent("ADDON_LOADED")
 driver:RegisterEvent("SPELLS_CHANGED")
 driver:RegisterEvent("PLAYER_TALENT_UPDATE")
 driver:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
@@ -196,5 +203,8 @@ driver:SetScript("OnEvent", function(_, event, unit)
 
     ResolveThunderousPawsID()
     icon:SetTexture(GetSpellTextureSafe(thunderousPawsID, THUNDEROUS_PAWS_NAME))
+    if event == "ADDON_LOADED" or event == "PLAYER_ENTERING_WORLD" then
+        TryAnchorToECMEBuffs()
+    end
     UpdateTracker()
 end)
