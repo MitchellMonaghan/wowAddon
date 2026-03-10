@@ -1,200 +1,131 @@
 local _, ns = ...
-
 if select(2, UnitClass("player")) ~= "SHAMAN" then return end
 
-local THUNDEROUS_PAWS_ID = 378075
-local THUNDEROUS_PAWS_NAME = "Thunderous Paws"
+local GHOST_WOLF_SPELL_ID = 2645
+local THUNDEROUS_PAWS_TALENT_ID = 378075
 local COOLDOWN_SECONDS = 20
+local ICON_SIZE = 40 
 
-local thunderousPawsID = nil
-local buffWasActive = false
+-- ASSETS
+local MASK_PATH   = [[Interface\AddOns\EllesmereUI\media\portraits\csquare_mask.tga]]
+local BORDER_PATH = [[Interface\AddOns\EllesmereUI\media\portraits\csquare_border.tga]]
+local FONT_PATH   = [[Interface\AddOns\EllesmereUI\media\fonts\Expressway.TTF]]
+
 local cooldownEndsAt = 0
 
-local frame = CreateFrame("Frame", nil, UIParent)
-frame:SetSize(40, 40)
-frame:SetPoint("CENTER", UIParent, "CENTER", 0, -120)
+-- UI Frame Setup
+local frame = CreateFrame("Frame", "EABR_ThunderousPaws", UIParent)
+frame:SetSize(ICON_SIZE, ICON_SIZE)
 frame:SetFrameStrata("HIGH")
 
 local bg = frame:CreateTexture(nil, "BACKGROUND")
 bg:SetAllPoints()
-bg:SetColorTexture(0, 0, 0, 0.65)
+bg:SetTexture(MASK_PATH)
+bg:SetVertexColor(0, 0, 0, 1)
 
 local icon = frame:CreateTexture(nil, "ARTWORK")
-icon:SetPoint("TOPLEFT", 2, -2)
-icon:SetPoint("BOTTOMRIGHT", -2, 2)
+icon:SetPoint("TOPLEFT", frame, "TOPLEFT", 2, -2) 
+icon:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -2, 2)
+icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+-- Midnight-safe texture fetch
+local pawsTex = C_Spell.GetSpellTexture(THUNDEROUS_PAWS_TALENT_ID)
+icon:SetTexture(pawsTex or 134400)
+
+local mask = frame:CreateMaskTexture()
+mask:SetTexture(MASK_PATH, "CLAMPTOBORDER", "CLAMPTOBORDER")
+mask:SetAllPoints(icon)
+icon:AddMaskTexture(mask)
+
+local border = frame:CreateTexture(nil, "OVERLAY")
+border:SetAllPoints(frame)
+border:SetTexture(BORDER_PATH)
+border:SetVertexColor(0, 0, 0, 1)
+
+local timerText = frame:CreateFontString(nil, "OVERLAY")
+timerText:SetFont(FONT_PATH, 20, "OUTLINE") 
+timerText:SetPoint("CENTER", frame, "CENTER", 0, 0)
+timerText:SetTextColor(1, 1, 1, 1)
+timerText:Hide()
 
 local cooldown = CreateFrame("Cooldown", nil, frame, "CooldownFrameTemplate")
 cooldown:SetAllPoints(icon)
 cooldown:SetDrawEdge(false)
 cooldown:SetSwipeColor(0, 0, 0, 0.8)
-cooldown:SetHideCountdownNumbers(false)
+cooldown:SetHideCountdownNumbers(true) 
+if cooldown.AddMaskTexture then cooldown:AddMaskTexture(mask) end
 
-local border = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-border:SetPoint("TOPLEFT", -1, 1)
-border:SetPoint("BOTTOMRIGHT", 1, -1)
-border:SetBackdrop({
-    edgeFile = "Interface\\Buttons\\WHITE8x8",
-    edgeSize = 1,
-})
-border:SetBackdropBorderColor(0.08, 0.08, 0.08, 1)
-
-local function ResolveThunderousPawsID()
-    thunderousPawsID = THUNDEROUS_PAWS_ID
+local function UpdatePosition()
+    local anchor = _G.ECME_CDMBar_buffs
+    if anchor then
+        frame:ClearAllPoints()
+        frame:SetPoint("LEFT", anchor, "RIGHT", -5, 0) 
+        frame:SetSize(ICON_SIZE, ICON_SIZE)
+    end
 end
 
-local function GetSpellTextureSafe(spellID, fallbackName)
-    if spellID and C_Spell and C_Spell.GetSpellTexture then
-        local tex = C_Spell.GetSpellTexture(spellID)
-        if tex then
-            return tex
-        end
+-- FIXED TALENT CHECK: Using IsPlayerSpell for 12.0/Midnight compatibility
+local function CheckTalent()
+    -- Global IsPlayerSpell is the standard for checking learned talents
+    local isKnown = IsPlayerSpell(THUNDEROUS_PAWS_TALENT_ID)
+    
+    if isKnown then
+        frame:Show()
+        UpdatePosition()
+    else
+        frame:Hide()
+        cooldownEndsAt = 0
+        timerText:Hide()
+        icon:SetDesaturated(false)
+        icon:SetAlpha(1)
     end
-
-    if GetSpellInfo then
-        local _, _, tex = GetSpellInfo(spellID or fallbackName)
-        if tex then
-            return tex
-        end
-    end
-
-    return 134400
 end
 
-local function IsKnown()
-    ResolveThunderousPawsID()
-
-    if thunderousPawsID and IsPlayerSpell and IsPlayerSpell(thunderousPawsID) then
-        return true
-    end
-
-    if C_SpellBook and C_SpellBook.FindSpellBookSlotForSpell then
-        local slot = C_SpellBook.FindSpellBookSlotForSpell(thunderousPawsID or THUNDEROUS_PAWS_NAME)
-        if slot then
-            return true
-        end
-    end
-
-    return false
-end
-
-local function GetBuffData()
-    ResolveThunderousPawsID()
-
-    if thunderousPawsID and AuraUtil and AuraUtil.FindAuraBySpellID then
-        local aura = AuraUtil.FindAuraBySpellID(thunderousPawsID, "player", "HELPFUL")
-        if aura then
-            return aura
-        end
-    end
-
-    if thunderousPawsID and C_UnitAuras and C_UnitAuras.GetAuraDataBySpellID then
-        local aura = C_UnitAuras.GetAuraDataBySpellID("player", thunderousPawsID)
-        if aura then
-            return aura
-        end
-    end
-
-    if thunderousPawsID and C_UnitAuras and C_UnitAuras.GetCooldownAuraBySpellID and C_UnitAuras.GetAuraDataBySpellID then
-        local ok, mappedAuraID = pcall(C_UnitAuras.GetCooldownAuraBySpellID, thunderousPawsID)
-        if ok and mappedAuraID then
-            local aura = C_UnitAuras.GetAuraDataBySpellID("player", mappedAuraID)
-            if aura then
-                return aura
-            end
-        end
-    end
-
-    if C_UnitAuras and C_UnitAuras.GetBuffDataByIndex then
-        for i = 1, 80 do
-            local aura = C_UnitAuras.GetBuffDataByIndex("player", i)
-            if not aura then
-                break
-            end
-
-            if aura.name == THUNDEROUS_PAWS_NAME then
-                return aura
-            end
-        end
-    end
-
-    return nil
-end
-
-local function StartCooldown(startTime)
+local function StartInternalCD()
+    local startTime = GetTime()
     cooldownEndsAt = startTime + COOLDOWN_SECONDS
+    
     icon:SetDesaturated(true)
-    icon:SetAlpha(0.45)
-    bg:SetAlpha(0.9)
+    icon:SetAlpha(0.4)
+    timerText:Show()
     cooldown:SetCooldown(startTime, COOLDOWN_SECONDS)
+    
     frame:SetScript("OnUpdate", function()
-        if GetTime() >= cooldownEndsAt then
+        local now = GetTime()
+        local remaining = cooldownEndsAt - now
+        
+        if remaining > 0 then
+            timerText:SetText(math.ceil(remaining))
+        else
             cooldownEndsAt = 0
             frame:SetScript("OnUpdate", nil)
-            cooldown:Clear()
             icon:SetDesaturated(false)
             icon:SetAlpha(1)
-            bg:SetAlpha(0.65)
+            timerText:Hide()
         end
     end)
 end
 
-local function UpdateTracker()
-    frame:Show()
-
-    if not IsKnown() then
-        cooldown:Clear()
-        icon:SetDesaturated(false)
-        icon:SetAlpha(1)
-        bg:SetAlpha(0.65)
-        return
-    end
-
-    local aura = GetBuffData()
-    local buffIsActive = aura ~= nil
-
-    if buffIsActive and not buffWasActive then
-        local startTime = GetTime()
-        if aura.expirationTime and aura.duration and aura.duration > 0 then
-            startTime = aura.expirationTime - aura.duration
-        end
-        StartCooldown(startTime)
-    end
-
-    buffWasActive = buffIsActive
-
-    if cooldownEndsAt > 0 and GetTime() < cooldownEndsAt then
-        frame:Show()
-        return
-    end
-
-    frame:Show()
-    cooldown:Clear()
-    icon:SetDesaturated(false)
-    icon:SetAlpha(1)
-    bg:SetAlpha(0.65)
-end
-
-ResolveThunderousPawsID()
-icon:SetTexture(GetSpellTextureSafe(thunderousPawsID, THUNDEROUS_PAWS_NAME))
-frame:Show()
-
+-- Main Driver
 local driver = CreateFrame("Frame")
+driver:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
 driver:RegisterEvent("PLAYER_ENTERING_WORLD")
-driver:RegisterEvent("SPELLS_CHANGED")
 driver:RegisterEvent("PLAYER_TALENT_UPDATE")
 driver:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
-driver:RegisterEvent("UNIT_AURA")
+driver:RegisterEvent("TRAIT_CONFIG_UPDATED")
 
-driver:SetScript("OnEvent", function(_, event, unit)
-    if event == "UNIT_AURA" and unit ~= "player" then
-        return
+driver:SetScript("OnEvent", function(self, event, unit, ...)
+    if event == "UNIT_SPELLCAST_SUCCEEDED" then
+        local spellID = select(2, ...)
+        if spellID == GHOST_WOLF_SPELL_ID then
+            if GetTime() >= cooldownEndsAt and IsPlayerSpell(THUNDEROUS_PAWS_TALENT_ID) then
+                StartInternalCD()
+            end
+        end
+    else
+        CheckTalent()
+        -- Staggered retries for the CDM anchor
+        C_Timer.After(0.5, CheckTalent)
+        C_Timer.After(2, CheckTalent)
     end
-
-    if event == "PLAYER_SPECIALIZATION_CHANGED" and unit and unit ~= "player" then
-        return
-    end
-
-    ResolveThunderousPawsID()
-    icon:SetTexture(GetSpellTextureSafe(thunderousPawsID, THUNDEROUS_PAWS_NAME))
-    UpdateTracker()
 end)
