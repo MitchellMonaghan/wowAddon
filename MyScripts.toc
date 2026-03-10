@@ -24,8 +24,8 @@ Modules\Shaman\Restoration\HealingStreamTracker.lua
 ## Shaman - Elemental
 
 ## Shaman - General
+## Modules\Shaman\General\NaturesGuardian.lua
 Modules\Shaman\General\ThunderousPawsTracker.lua
-Modules\Shaman\General\NaturesGuardian.lua
 Modules\Shaman\General\OneButtonRez.lua
 
 ## Warlock
