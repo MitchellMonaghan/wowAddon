@@ -50,6 +50,7 @@ local trackedSpellIDs = {}
 local trackedSpellNamesLower = {}
 local trackedSpellIDStrings = {}
 local pendingRebind = false
+local rebindQueued = false
 
 MyScriptsDB = MyScriptsDB or {}
 
@@ -106,13 +107,7 @@ end
 
 local function BaseKeyFromBinding(key)
     if type(key) ~= "string" then return nil end
-    local base = key
-    base = base:gsub("^ALT%-", "")
-    base = base:gsub("^CTRL%-", "")
-    base = base:gsub("^SHIFT%-", "")
-    base = base:gsub("^ALT%-", "")
-    base = base:gsub("^CTRL%-", "")
-    base = base:gsub("^SHIFT%-", "")
+    local base = key:gsub("ALT%-", ""):gsub("CTRL%-", ""):gsub("SHIFT%-", "")
     if base == "" then return nil end
     return base
 end
@@ -160,14 +155,6 @@ local function SlotContainsTrackedRez(slot)
 
         local body = GetMacroBodySafe(actionID)
         local actionText = GetActionText and GetActionText(slot) or nil
-        if GetMacroInfo then
-            local ok, macroName, _, macroBody = pcall(GetMacroInfo, actionID)
-            if ok then
-                if (not body or body == "") and type(macroBody) == "string" and macroBody ~= "" then
-                    body = macroBody
-                end
-            end
-        end
 
         if type(body) == "string" then
             local lowerBody = string.lower(body)
@@ -238,21 +225,34 @@ local function Rebind()
     end
 
     for command in pairs(commands) do
-        local keys = { GetBindingKey(command) }
-        for _, key in ipairs(keys) do
-            if key then
-                BindKeyWithModifierVariants(key, variantButtons)
-            end
+        local key1, key2 = GetBindingKey(command)
+        if key1 then
+            BindKeyWithModifierVariants(key1, variantButtons)
+        end
+        if key2 and key2 ~= key1 then
+            BindKeyWithModifierVariants(key2, variantButtons)
         end
     end
+end
+
+local function RequestRebind()
+    if rebindQueued then return end
+    rebindQueued = true
+    C_Timer.After(0.1, function()
+        rebindQueued = false
+        Rebind()
+    end)
 end
 
 driver:SetScript("OnEvent", function(_, event, unit)
     if event == "PLAYER_SPECIALIZATION_CHANGED" and unit and unit ~= "player" then
         return
     end
+    if event == "ACTIONBAR_SLOT_CHANGED" and type(unit) == "number" and (unit < 1 or unit > 180) then
+        return
+    end
     if event == "PLAYER_REGEN_ENABLED" and not pendingRebind then
         return
     end
-    Rebind()
+    RequestRebind()
 end)

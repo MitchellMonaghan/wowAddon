@@ -11,6 +11,8 @@ local MASK_PATH   = [[Interface\AddOns\EllesmereUI\media\portraits\csquare_mask.
 local BORDER_PATH = [[Interface\AddOns\EllesmereUI\media\portraits\csquare_border.tga]]
 
 local cooldownEndsAt = 0
+local updateAccumulator = 0
+local lastDisplayedSecond = nil
 
 local frame = CreateFrame("Frame", "EABR_ThunderousPaws", UIParent)
 frame:SetSize(ICON_SIZE, ICON_SIZE)
@@ -54,21 +56,35 @@ timerText:SetPoint("CENTER", frame, "CENTER", 0, 0)
 timerText:SetTextColor(1, 1, 1, 1)
 
 
+local function CooldownOnUpdate(_, elapsed)
+    updateAccumulator = updateAccumulator + elapsed
+    if updateAccumulator < 0.1 then return end
+    updateAccumulator = 0
+
+    local rem = cooldownEndsAt - GetTime()
+    if rem > 0 then
+        local display = math.ceil(rem)
+        if display ~= lastDisplayedSecond then
+            lastDisplayedSecond = display
+            timerText:SetText(display)
+        end
+        return
+    end
+
+    lastDisplayedSecond = nil
+    frame:SetScript("OnUpdate", nil)
+    frame:Hide()
+end
+
 local function StartCD()
     local start = GetTime()
     cooldownEndsAt = start + COOLDOWN_SECONDS
+    updateAccumulator = 0
+    lastDisplayedSecond = nil
     frame:Show()
     cooldown:SetCooldown(start, COOLDOWN_SECONDS)
-    
-    frame:SetScript("OnUpdate", function()
-        local rem = cooldownEndsAt - GetTime()
-        if rem > 0 then
-            timerText:SetText(math.ceil(rem))
-        else
-            frame:SetScript("OnUpdate", nil)
-            frame:Hide()
-        end
-    end)
+    timerText:SetText(COOLDOWN_SECONDS)
+    frame:SetScript("OnUpdate", CooldownOnUpdate)
 end
 
 local function UpdatePos()
