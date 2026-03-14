@@ -4,7 +4,7 @@ if select(2, UnitClass("player")) ~= "SHAMAN" then return end
 local GHOST_WOLF_SPELL_ID = 2645
 local THUNDEROUS_PAWS_TALENT_ID = 378075
 local COOLDOWN_SECONDS = 20
-local ICON_SIZE = 50
+local ICON_SIZE = 38
 
 local FONT_PATH   = [[Interface\AddOns\EllesmereUI\media\fonts\Expressway.TTF]]
 local MASK_PATH   = [[Interface\AddOns\EllesmereUI\media\portraits\csquare_mask.tga]]
