@@ -14,12 +14,13 @@ Libs\Ace3_Libs\AceTimer-3.0\AceTimer-3.0.lua
 Core.lua
 
 ## Generic
+Modules\Generic\CooldownManagerSkin.lua
 
 ## Paladin
 Modules\Paladin\General\OneButtonRez.lua
 
 ## Shaman - Restoration
-Modules\Shaman\Restoration\HealingStreamTracker.lua
+## Modules\Shaman\Restoration\HealingStreamTracker.lua
 
 ## Shaman - Elemental
 
