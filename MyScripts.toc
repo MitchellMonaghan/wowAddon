@@ -20,7 +20,6 @@ Modules\Generic\CooldownManagerSkin.lua
 Modules\Paladin\General\OneButtonRez.lua
 
 ## Shaman - Restoration
-## Modules\Shaman\Restoration\HealingStreamTracker.lua
 
 ## Shaman - Elemental
 
