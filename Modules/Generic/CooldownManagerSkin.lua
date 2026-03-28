@@ -10,11 +10,12 @@ local BORDER_TEXTURE_EXTRA_PIXELS = 0
 local BORDER_TEXTURE_SCALE = 0.96
 local ICON_ZOOM = 0.08
 local RESCAN_INTERVAL = 0.20
+local ROTATION_SCAN_INTERVAL = 0.08
 -- Set false if you still run CooldownManagerCentered and only want icon skinning here.
 local ENABLE_POSITIONING = true
+local ENABLE_ROTATION_HIGHLIGHT = true
 
 local MASK_PATH = [[Interface\AddOns\MyScripts\Media\Textures\csquare_mask.tga]]
-local SWIPE_MASK_PATH = [[Interface\AddOns\CooldownManagerCentered\Media\Art\Square]]
 local BORDER_TEXTURE_PATH = [[Interface\AddOns\MyScripts\Media\Textures\defaultEER.blp]]
 -- `border_thin.blp` is not suitable here (it fills icon center on CDM buttons).
 
@@ -34,7 +35,13 @@ local styledButtons = setmetatable({}, { __mode = "k" })
 local hookedMixins = {}
 local dirtyViewers = setmetatable({}, { __mode = "k" })
 local viewerVisibleCounts = setmetatable({}, { __mode = "k" })
+local rotationHighlightViewers = {
+    EssentialCooldownViewer = true,
+    UtilityCooldownViewer = true,
+}
 local floor = math.floor
+local lastSuggestedSpellID = nil
+local rotationDirty = true
 
 local function EnsureBorder(button)
     if button._myScriptsBorder and button._myScriptsBorder.Hide then
@@ -84,7 +91,7 @@ local function StyleButton(button)
     button.Cooldown:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -BORDER_REVEAL_INSET, BORDER_REVEAL_INSET)
     button.Cooldown:SetDrawEdge(false)
     if button.Cooldown.SetSwipeTexture then
-        button.Cooldown:SetSwipeTexture(SWIPE_MASK_PATH)
+        button.Cooldown:SetSwipeTexture(MASK_PATH)
     end
 
     for _, region in ipairs({ button:GetRegions() }) do
@@ -98,6 +105,135 @@ local function StyleButton(button)
 
     EnsureBorder(button)
     styledButtons[button] = true
+end
+
+local function EnsureRotationHighlight(button)
+    if button._myScriptsRotationHighlight then
+        return button._myScriptsRotationHighlight
+    end
+
+    local holder = CreateFrame("Frame", nil, button)
+    holder:SetFrameLevel(button:GetFrameLevel() + 10)
+    holder:SetPoint("CENTER", button, "CENTER", 0, 0)
+
+    local tex = holder:CreateTexture(nil, "OVERLAY", nil, 7)
+    tex:SetPoint("CENTER", holder, "CENTER", 0, 0)
+    tex:SetBlendMode("ADD")
+
+    local usingFlipbook = false
+    if tex.SetAtlas then
+        usingFlipbook = tex:SetAtlas("RotationHelper_Ants_Flipbook_2x", false) == true
+    end
+
+    if not usingFlipbook then
+        if tex.SetAtlas and tex:SetAtlas("UI-CooldownManager-ActiveGlow", false) then
+            tex:SetVertexColor(0.20, 0.70, 1.0, 1)
+        else
+            tex:SetTexture(BORDER_TEXTURE_PATH)
+            tex:SetVertexColor(0.20, 0.70, 1.0, 1)
+        end
+    end
+
+    holder.Texture = tex
+    holder.UsingFlipbook = usingFlipbook
+
+    if usingFlipbook then
+        local ag = holder:CreateAnimationGroup()
+        ag:SetLooping("REPEAT")
+        local flip = ag:CreateAnimation("FlipBook")
+        flip:SetChildKey("Texture")
+        flip:SetOrder(1)
+        flip:SetDuration(1.0)
+        flip:SetFlipBookRows(6)
+        flip:SetFlipBookColumns(5)
+        flip:SetFlipBookFrames(30)
+        holder.Anim = ag
+    end
+
+    holder:Hide()
+    button._myScriptsRotationHighlight = holder
+    return holder
+end
+
+local function UpdateRotationHighlightSize(button)
+    local glow = EnsureRotationHighlight(button)
+    local w = button:GetWidth() or 0
+    local h = button:GetHeight() or 0
+    if w <= 0 or h <= 0 then return end
+    glow:SetSize(w * 1.42, h * 1.42)
+    if glow.Texture then
+        glow.Texture:SetSize(w * 1.42, h * 1.42)
+    end
+end
+
+local function GetButtonSpellIDs(button)
+    if not button or not button.cooldownID then return nil, nil end
+    if not C_CooldownViewer or not C_CooldownViewer.GetCooldownViewerCooldownInfo then
+        return nil, nil
+    end
+    local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(button.cooldownID)
+    if not info then return nil, nil end
+    return info.spellID, info.overrideSpellID
+end
+
+local function SetRotationHighlight(button, show)
+    local glow = EnsureRotationHighlight(button)
+    if show then
+        UpdateRotationHighlightSize(button)
+        glow:Show()
+        if glow.Anim and not glow.Anim:IsPlaying() then
+            glow.Anim:Play()
+        end
+    else
+        if glow.Anim and glow.Anim:IsPlaying() then
+            glow.Anim:Stop()
+        end
+        glow:Hide()
+    end
+end
+
+local function RefreshRotationHighlights(force)
+    if not ENABLE_ROTATION_HIGHLIGHT then
+        for viewerName in pairs(rotationHighlightViewers) do
+            local viewer = _G[viewerName]
+            if viewer then
+                local children = { viewer:GetChildren() }
+                for i = 1, #children do
+                    local child = children[i]
+                    if child and child._myScriptsRotationHighlight then
+                        child._myScriptsRotationHighlight:Hide()
+                    end
+                end
+            end
+        end
+        return
+    end
+
+    if not C_AssistedCombat or not C_AssistedCombat.GetNextCastSpell then
+        return
+    end
+
+    local suggestedSpellID = C_AssistedCombat.GetNextCastSpell()
+    if not force and not rotationDirty and suggestedSpellID == lastSuggestedSpellID then
+        return
+    end
+    lastSuggestedSpellID = suggestedSpellID
+    rotationDirty = false
+
+    for viewerName in pairs(rotationHighlightViewers) do
+        local viewer = _G[viewerName]
+        if viewer then
+            local children = { viewer:GetChildren() }
+            for i = 1, #children do
+                local child = children[i]
+                if child and child.Icon and child.Cooldown then
+                    local spellID, overrideSpellID = GetButtonSpellIDs(child)
+                    local show = suggestedSpellID and (spellID == suggestedSpellID or overrideSpellID == suggestedSpellID)
+                    SetRotationHighlight(child, show == true)
+                end
+            end
+        end
+    end
 end
 
 local function GetVisibleButtons(viewer)
@@ -312,6 +448,9 @@ local function ApplyToAll()
             local children = { viewer:GetChildren() }
             for j = 1, #children do
                 StyleButton(children[j])
+                if rotationHighlightViewers[VIEWER_NAMES[i]] then
+                    UpdateRotationHighlightSize(children[j])
+                end
             end
             if ENABLE_POSITIONING then
                 local visibleCount = #GetVisibleButtons(viewer)
@@ -332,6 +471,13 @@ local function TryHookMixins()
             if mixin and mixin.OnCooldownIDSet then
                 hooksecurefunc(mixin, "OnCooldownIDSet", function(frame)
                     StyleButton(frame)
+                    if frame and frame.GetParent then
+                        local parent = frame:GetParent()
+                        if parent and parent.GetName and rotationHighlightViewers[parent:GetName() or ""] then
+                            rotationDirty = true
+                            UpdateRotationHighlightSize(frame)
+                        end
+                    end
                     local parent = frame and frame:GetParent() or nil
                     if parent and ENABLE_POSITIONING then
                         MarkViewerDirty(parent)
@@ -345,12 +491,19 @@ end
 
 local driver = CreateFrame("Frame")
 local elapsed = 0
+local rotationElapsed = 0
 
 driver:RegisterEvent("PLAYER_ENTERING_WORLD")
 driver:RegisterEvent("SPELLS_CHANGED")
+driver:RegisterEvent("PLAYER_TALENT_UPDATE")
+driver:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+driver:RegisterEvent("TRAIT_CONFIG_UPDATED")
+driver:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
 driver:SetScript("OnEvent", function()
     TryHookMixins()
     ApplyToAll()
+    rotationDirty = true
+    RefreshRotationHighlights(true)
     if ENABLE_POSITIONING then
         for i = 1, #VIEWER_NAMES do
             MarkViewerDirty(_G[VIEWER_NAMES[i]])
@@ -361,12 +514,25 @@ end)
 driver:SetScript("OnUpdate", function(_, dt)
     ProcessDirtyViewers()
 
+    rotationElapsed = rotationElapsed + dt
+    if rotationElapsed >= ROTATION_SCAN_INTERVAL then
+        rotationElapsed = 0
+        RefreshRotationHighlights(false)
+    end
+
     elapsed = elapsed + dt
     if elapsed < RESCAN_INTERVAL then return end
     elapsed = 0
     TryHookMixins()
     ApplyToAll()
 end)
+
+if AssistedCombatManager and AssistedCombatManager.UpdateAllAssistedHighlightFramesForSpell then
+    hooksecurefunc(AssistedCombatManager, "UpdateAllAssistedHighlightFramesForSpell", function()
+        rotationDirty = true
+        RefreshRotationHighlights(false)
+    end)
+end
 
 if ns and ns.Print then
     ns.Print("CooldownManagerSkin enabled.")
