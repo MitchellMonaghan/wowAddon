@@ -8,12 +8,17 @@ if not ENABLED then return end
 local BORDER_REVEAL_INSET = 1
 local BORDER_TEXTURE_EXTRA_PIXELS = 0
 local BORDER_TEXTURE_SCALE = 0.96
-local ICON_ZOOM = 0.08
+local ICON_ZOOM = 0
 local RESCAN_INTERVAL = 0.20
 local ROTATION_SCAN_INTERVAL = 0.08
+local TRACKED_BARS_ENFORCE_INTERVAL = 0.10
 -- Set false if you still run CooldownManagerCentered and only want icon skinning here.
 local ENABLE_POSITIONING = true
 local ENABLE_ROTATION_HIGHLIGHT = true
+local ENABLE_TRACKED_BARS_BOTTOM_UP = true
+local ENABLE_TRACKED_BARS_BOTTOM_LOCK = false
+local SPEC_RECENTER_INTERVAL = 0.08
+local SPEC_RECENTER_PASSES = 18
 
 local MASK_PATH = [[Interface\AddOns\MyScripts\Media\Textures\csquare_mask.tga]]
 local BORDER_TEXTURE_PATH = [[Interface\AddOns\MyScripts\Media\Textures\defaultEER.blp]]
@@ -34,7 +39,12 @@ local MIXIN_NAMES = {
 local styledButtons = setmetatable({}, { __mode = "k" })
 local hookedMixins = {}
 local dirtyViewers = setmetatable({}, { __mode = "k" })
-local viewerVisibleCounts = setmetatable({}, { __mode = "k" })
+local trackedBarsBottomAnchor = nil
+local trackedBarsDirty = true
+local trackedBarsVisibleCount = -1
+local essentialDesiredCenter = nil
+local pendingSpecRecenterPasses = 0
+local specRecenterElapsed = 0
 local rotationHighlightViewers = {
     EssentialCooldownViewer = true,
     UtilityCooldownViewer = true,
@@ -42,6 +52,29 @@ local rotationHighlightViewers = {
 local floor = math.floor
 local lastSuggestedSpellID = nil
 local rotationDirty = true
+local RecenterViewer
+local MarkViewerDirty
+
+local function GetCooldownSkinStore()
+    MyScriptsDB = MyScriptsDB or {}
+    MyScriptsDB.cooldownManagerSkin = MyScriptsDB.cooldownManagerSkin or {}
+    return MyScriptsDB.cooldownManagerSkin
+end
+
+local function SaveEssentialDesiredCenter(x, y)
+    essentialDesiredCenter = { x = x, y = y }
+    local store = GetCooldownSkinStore()
+    store.essentialDesiredCenter = { x = x, y = y }
+end
+
+local function CaptureEssentialDesiredCenterFromViewer(viewer, force)
+    if not viewer or (not force and essentialDesiredCenter) then return end
+    local vx, vy = viewer:GetCenter()
+    local ux, uy = UIParent:GetCenter()
+    if not vx or not vy or not ux or not uy then return end
+    local rx, ry = vx - ux, vy - uy
+    SaveEssentialDesiredCenter(rx, ry)
+end
 
 local function EnsureBorder(button)
     if button._myScriptsBorder and button._myScriptsBorder.Hide then
@@ -238,11 +271,115 @@ end
 
 local function GetVisibleButtons(viewer)
     local out = {}
+    local candidates = {}
     if not viewer then return out end
+    local viewerName = viewer.GetName and viewer:GetName() or ""
     local children = { viewer:GetChildren() }
+
+    local function IsLayoutActive(child)
+        if not child then return false end
+        -- Avoid reading secret/protected fields (e.g. `isActive`) to prevent taint
+        -- compare errors in Blizzard CDM frames.
+        if viewerName == "EssentialCooldownViewer" or viewerName == "UtilityCooldownViewer" then
+            if child.cooldownID == nil then
+                return false
+            end
+            if C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo then
+                local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(child.cooldownID)
+                if not info then
+                    return false
+                end
+                return (info.spellID ~= nil) or (info.overrideSpellID ~= nil)
+            end
+            return true
+        end
+
+        local hasAuraInstance = child.auraInstanceID ~= nil
+        local hasCooldownID = child.cooldownID ~= nil
+        local hasIconTexture = child.Icon and child.Icon.GetTexture and child.Icon:GetTexture() ~= nil
+        return hasAuraInstance or hasCooldownID or hasIconTexture
+    end
+
     for i = 1, #children do
         local child = children[i]
-        if child and child.Icon and child.Cooldown and child:IsShown() and (child:GetAlpha() or 0) > 0 then
+        if child
+            and child.Icon
+            and child.Cooldown
+            and child:IsShown()
+            and child:IsVisible()
+            and (child:GetAlpha() or 0) > 0
+        then
+            candidates[#candidates + 1] = child
+            if IsLayoutActive(child) then
+                out[#out + 1] = child
+            end
+        end
+    end
+
+    -- During spec swaps, CDM can briefly report incomplete active metadata.
+    -- If Essential/Utility collapses to 0/1 active while more visible buttons exist,
+    -- use visible candidates for this pass to avoid "icon 1 pinned at center" jumps.
+    if (viewerName == "EssentialCooldownViewer" or viewerName == "UtilityCooldownViewer")
+        and #out <= 1 and #candidates > #out
+    then
+        out = candidates
+    end
+
+    table.sort(out, function(a, b)
+        return (a.layoutIndex or 0) < (b.layoutIndex or 0)
+    end)
+    return out
+end
+
+local function QueueSpecRecenter()
+    pendingSpecRecenterPasses = SPEC_RECENTER_PASSES
+    specRecenterElapsed = 0
+end
+
+local function ProcessSpecRecenter(dt)
+    if pendingSpecRecenterPasses <= 0 then return end
+    specRecenterElapsed = specRecenterElapsed + dt
+    if specRecenterElapsed < SPEC_RECENTER_INTERVAL then return end
+    specRecenterElapsed = 0
+
+    local essential = _G.EssentialCooldownViewer
+    if essential then MarkViewerDirty(essential) end
+    pendingSpecRecenterPasses = pendingSpecRecenterPasses - 1
+end
+
+local function IsEditModeOpen()
+    if C_EditMode and C_EditMode.IsInEditMode then
+        local ok, inEdit = pcall(C_EditMode.IsInEditMode)
+        if ok and inEdit ~= nil then
+            return inEdit == true
+        end
+    end
+    return EditModeManagerFrame and EditModeManagerFrame:IsShown() == true
+end
+
+local function GetVisibleTrackedBars(viewer)
+    local out = {}
+    if not viewer then return out end
+
+    local frames = {}
+    if viewer.GetItemFrames then
+        local ok, items = pcall(viewer.GetItemFrames, viewer)
+        if ok and items then
+            for i = 1, #items do
+                frames[#frames + 1] = items[i]
+            end
+        end
+    end
+    if #frames == 0 then
+        local children = { viewer:GetChildren() }
+        for i = 1, #children do
+            frames[#frames + 1] = children[i]
+        end
+    end
+
+    for i = 1, #frames do
+        local child = frames[i]
+        if child and child:IsShown() and (child:GetAlpha() or 0) > 0 then
             out[#out + 1] = child
         end
     end
@@ -251,6 +388,52 @@ local function GetVisibleButtons(viewer)
     end)
     return out
 end
+
+local function EnsureTrackedBarsBottomLock(viewer)
+    if not ENABLE_TRACKED_BARS_BOTTOM_LOCK or not viewer then return end
+
+    if not trackedBarsBottomAnchor then
+        local vx, vy = viewer:GetCenter()
+        local vb = viewer:GetBottom()
+        local ux, uy = UIParent:GetCenter()
+        if not vx or not vy or not vb or not ux or not uy then return end
+
+        trackedBarsBottomAnchor = CreateFrame("Frame", nil, UIParent)
+        trackedBarsBottomAnchor:SetSize(1, 1)
+        trackedBarsBottomAnchor:SetPoint("CENTER", UIParent, "CENTER", vx - ux, vb - uy)
+    end
+
+    local point, relativeTo, relativePoint, x, y = viewer:GetPoint(1)
+    if point ~= "BOTTOM" or relativeTo ~= trackedBarsBottomAnchor or relativePoint ~= "CENTER" or x ~= 0 or y ~= 0 then
+        viewer:ClearAllPoints()
+        viewer:SetPoint("BOTTOM", trackedBarsBottomAnchor, "CENTER", 0, 0)
+    end
+end
+
+local function PositionTrackedBarsBottomUp()
+    if not ENABLE_TRACKED_BARS_BOTTOM_UP then return end
+    local viewer = _G.BuffBarCooldownViewer
+    if not viewer then return end
+
+    EnsureTrackedBarsBottomLock(viewer)
+
+    local bars = GetVisibleTrackedBars(viewer)
+    if #bars == 0 then return end
+
+    local spacing = viewer.childYPadding or 2
+    local previous = nil
+    for i = 1, #bars do
+        local bar = bars[i]
+        bar:ClearAllPoints()
+        if previous then
+            bar:SetPoint("BOTTOM", previous, "TOP", 0, spacing)
+        else
+            bar:SetPoint("BOTTOM", viewer, "BOTTOM", 0, 0)
+        end
+        previous = bar
+    end
+end
+
 
 local function BuildRows(iconLimit, children)
     local rows = {}
@@ -348,17 +531,23 @@ local function InferIconLimit(icons, isHorizontal, w, h, fallback)
     return maxInGroup
 end
 
-local function RecenterViewer(viewer)
+function RecenterViewer(viewer)
     local icons = GetVisibleButtons(viewer)
     local count = #icons
     if count == 0 then return end
+    local viewerName = viewer.GetName and viewer:GetName() or ""
 
     local first = icons[1]
     local w = first:GetWidth() or 0
     local h = first:GetHeight() or 0
     if w <= 0 or h <= 0 then return end
 
-    local isHorizontal = InferIsHorizontal(viewer, icons)
+    local isHorizontal
+    if viewerName == "EssentialCooldownViewer" or viewerName == "UtilityCooldownViewer" then
+        isHorizontal = viewer.isHorizontal ~= false
+    else
+        isHorizontal = InferIsHorizontal(viewer, icons)
+    end
     local iconDirection = viewer.iconDirection == 1 and "NORMAL" or "REVERSED"
     local iconDir = (iconDirection == "NORMAL") and 1 or -1
 
@@ -366,7 +555,9 @@ local function RecenterViewer(viewer)
     if iconLimit <= 0 then
         iconLimit = count
     end
-    iconLimit = InferIconLimit(icons, isHorizontal, w, h, iconLimit)
+    if viewerName == "BuffIconCooldownViewer" then
+        iconLimit = InferIconLimit(icons, isHorizontal, w, h, iconLimit)
+    end
     if iconLimit <= 0 then
         iconLimit = count
     end
@@ -374,6 +565,28 @@ local function RecenterViewer(viewer)
     local rows = BuildRows(iconLimit, icons)
     local rowCount = #rows
     if rowCount == 0 then return end
+
+    local centerAdjustX, centerAdjustY = 0, 0
+    if viewerName == "EssentialCooldownViewer" then
+        CaptureEssentialDesiredCenterFromViewer(viewer, false)
+        if essentialDesiredCenter then
+            local vx, vy = viewer:GetCenter()
+            local ux, uy = UIParent:GetCenter()
+            if vx and vy and ux and uy then
+                local currentRelX = vx - ux
+                local currentRelY = vy - uy
+                local deltaX = essentialDesiredCenter.x - currentRelX
+                local deltaY = essentialDesiredCenter.y - currentRelY
+                if math.abs(deltaX) > 0.05 or math.abs(deltaY) > 0.05 then
+                    local p, relTo, relP, ox, oy = viewer:GetPoint(1)
+                    if p and relP and ox and oy then
+                        viewer:ClearAllPoints()
+                        viewer:SetPoint(p, relTo, relP, ox + deltaX, oy + deltaY)
+                    end
+                end
+            end
+        end
+    end
 
     local crossDir = 1
     if count > iconLimit then
@@ -405,7 +618,7 @@ local function RecenterViewer(viewer)
             for i = 1, #row do
                 local button = row[i]
                 button:ClearAllPoints()
-                button:SetPoint("CENTER", viewer, "CENTER", xOffsets[i] or 0, y)
+                button:SetPoint("CENTER", viewer, "CENTER", (xOffsets[i] or 0) + centerAdjustX, y + centerAdjustY)
             end
         end
     else
@@ -422,15 +635,52 @@ local function RecenterViewer(viewer)
             for i = 1, #col do
                 local button = col[i]
                 button:ClearAllPoints()
-                button:SetPoint("CENTER", viewer, "CENTER", x, yOffsets[i] or 0)
+                button:SetPoint("CENTER", viewer, "CENTER", x + centerAdjustX, (yOffsets[i] or 0) + centerAdjustY)
             end
         end
     end
 end
 
-local function MarkViewerDirty(viewer)
+MarkViewerDirty = function(viewer)
     if not viewer then return end
+    local viewerName = viewer.GetName and viewer:GetName() or ""
+    if viewerName ~= "EssentialCooldownViewer" then
+        return
+    end
     dirtyViewers[viewer] = true
+end
+
+local function EnsureStateHooksForFrame(frame)
+    if not frame or frame._myScriptsStateHooks == true then return end
+    frame._myScriptsStateHooks = true
+
+    if frame.OnActiveStateChanged then
+        hooksecurefunc(frame, "OnActiveStateChanged", function(self)
+            local p = self and self.GetParent and self:GetParent() or nil
+            if p then MarkViewerDirty(p) end
+        end)
+    end
+    if frame.OnUnitAuraAddedEvent then
+        hooksecurefunc(frame, "OnUnitAuraAddedEvent", function(self)
+            local p = self and self.GetParent and self:GetParent() or nil
+            if p then MarkViewerDirty(p) end
+        end)
+    end
+    if frame.OnUnitAuraRemovedEvent then
+        hooksecurefunc(frame, "OnUnitAuraRemovedEvent", function(self)
+            local p = self and self.GetParent and self:GetParent() or nil
+            if p then MarkViewerDirty(p) end
+        end)
+    end
+
+    frame:HookScript("OnHide", function(self)
+        local p = self and self.GetParent and self:GetParent() or nil
+        if p then MarkViewerDirty(p) end
+    end)
+    frame:HookScript("OnShow", function(self)
+        local p = self and self.GetParent and self:GetParent() or nil
+        if p then MarkViewerDirty(p) end
+    end)
 end
 
 local function ProcessDirtyViewers()
@@ -448,17 +698,23 @@ local function ApplyToAll()
             local children = { viewer:GetChildren() }
             for j = 1, #children do
                 StyleButton(children[j])
+                EnsureStateHooksForFrame(children[j])
                 if rotationHighlightViewers[VIEWER_NAMES[i]] then
                     UpdateRotationHighlightSize(children[j])
                 end
             end
             if ENABLE_POSITIONING then
-                local visibleCount = #GetVisibleButtons(viewer)
-                if viewerVisibleCounts[viewer] ~= visibleCount then
-                    viewerVisibleCounts[viewer] = visibleCount
-                    MarkViewerDirty(viewer)
-                end
+                MarkViewerDirty(viewer)
             end
+        end
+    end
+
+    local buffBarViewer = _G.BuffBarCooldownViewer
+    if buffBarViewer then
+        local visibleCount = #GetVisibleTrackedBars(buffBarViewer)
+        if visibleCount ~= trackedBarsVisibleCount then
+            trackedBarsVisibleCount = visibleCount
+            trackedBarsDirty = true
         end
     end
 end
@@ -471,11 +727,15 @@ local function TryHookMixins()
             if mixin and mixin.OnCooldownIDSet then
                 hooksecurefunc(mixin, "OnCooldownIDSet", function(frame)
                     StyleButton(frame)
+                    EnsureStateHooksForFrame(frame)
                     if frame and frame.GetParent then
                         local parent = frame:GetParent()
                         if parent and parent.GetName and rotationHighlightViewers[parent:GetName() or ""] then
                             rotationDirty = true
                             UpdateRotationHighlightSize(frame)
+                        end
+                        if parent and parent.GetName and parent:GetName() == "BuffBarCooldownViewer" then
+                            trackedBarsDirty = true
                         end
                     end
                     local parent = frame and frame:GetParent() or nil
@@ -487,11 +747,33 @@ local function TryHookMixins()
             end
         end
     end
+
+    if not hookedMixins.CooldownViewerBuffBarItemMixin then
+        local mixin = _G.CooldownViewerBuffBarItemMixin
+        if mixin and mixin.OnCooldownIDSet then
+            hooksecurefunc(mixin, "OnCooldownIDSet", function(frame)
+                local parent = frame and frame.GetParent and frame:GetParent() or nil
+                if parent and parent.GetName and parent:GetName() == "BuffBarCooldownViewer" then
+                    trackedBarsDirty = true
+                end
+            end)
+            hookedMixins.CooldownViewerBuffBarItemMixin = true
+        end
+    end
 end
 
 local driver = CreateFrame("Frame")
 local elapsed = 0
 local rotationElapsed = 0
+local trackedBarsElapsed = 0
+
+do
+    local store = GetCooldownSkinStore()
+    local desired = store.essentialDesiredCenter
+    if type(desired) == "table" and type(desired.x) == "number" and type(desired.y) == "number" then
+        essentialDesiredCenter = { x = desired.x, y = desired.y }
+    end
+end
 
 driver:RegisterEvent("PLAYER_ENTERING_WORLD")
 driver:RegisterEvent("SPELLS_CHANGED")
@@ -499,20 +781,65 @@ driver:RegisterEvent("PLAYER_TALENT_UPDATE")
 driver:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 driver:RegisterEvent("TRAIT_CONFIG_UPDATED")
 driver:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
-driver:SetScript("OnEvent", function()
+driver:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED")
+driver:SetScript("OnEvent", function(_, event)
+    local e = _G.EssentialCooldownViewer
+
+    if event == "PLAYER_ENTERING_WORLD" and e then
+        CaptureEssentialDesiredCenterFromViewer(e, false)
+    elseif event == "EDIT_MODE_LAYOUTS_UPDATED" and e and IsEditModeOpen() then
+        CaptureEssentialDesiredCenterFromViewer(e, true)
+    end
+    if event == "PLAYER_SPECIALIZATION_CHANGED"
+        or event == "PLAYER_TALENT_UPDATE"
+        or event == "SPELLS_CHANGED"
+        or event == "TRAIT_CONFIG_UPDATED"
+    then
+        QueueSpecRecenter()
+    end
     TryHookMixins()
     ApplyToAll()
+    trackedBarsDirty = true
     rotationDirty = true
     RefreshRotationHighlights(true)
-    if ENABLE_POSITIONING then
-        for i = 1, #VIEWER_NAMES do
-            MarkViewerDirty(_G[VIEWER_NAMES[i]])
-        end
+    if ENABLE_POSITIONING and e then
+        MarkViewerDirty(e)
     end
 end)
 
+SLASH_MYSCRIPTSCDM1 = "/mscdm"
+SlashCmdList.MYSCRIPTSCDM = function(msg)
+    local arg = string.lower((msg or ""):match("^%s*(.-)%s*$"))
+    if arg == "setcenter" then
+        local viewer = _G.EssentialCooldownViewer
+        if not viewer then
+            if ns and ns.Print then ns.Print("MSCDM setcenter: EssentialCooldownViewer missing") end
+            return
+        end
+        CaptureEssentialDesiredCenterFromViewer(viewer, true)
+        if ns and ns.Print then
+            ns.Print("MSCDM setcenter: desired center updated")
+        end
+        return
+    end
+    if ns and ns.Print then
+        ns.Print("Usage: /mscdm setcenter")
+    end
+end
+
 driver:SetScript("OnUpdate", function(_, dt)
+    ProcessSpecRecenter(dt)
     ProcessDirtyViewers()
+    if trackedBarsDirty then
+        PositionTrackedBarsBottomUp()
+        trackedBarsDirty = false
+    end
+
+    trackedBarsElapsed = trackedBarsElapsed + dt
+    if trackedBarsElapsed >= TRACKED_BARS_ENFORCE_INTERVAL then
+        trackedBarsElapsed = 0
+        PositionTrackedBarsBottomUp()
+    end
 
     rotationElapsed = rotationElapsed + dt
     if rotationElapsed >= ROTATION_SCAN_INTERVAL then
