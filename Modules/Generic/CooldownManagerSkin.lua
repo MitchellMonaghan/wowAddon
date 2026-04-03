@@ -643,10 +643,6 @@ end
 
 MarkViewerDirty = function(viewer)
     if not viewer then return end
-    local viewerName = viewer.GetName and viewer:GetName() or ""
-    if viewerName ~= "EssentialCooldownViewer" then
-        return
-    end
     dirtyViewers[viewer] = true
 end
 
