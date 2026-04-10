@@ -45,6 +45,7 @@ local trackedBarsVisibleCount = -1
 local essentialDesiredCenter = nil
 local pendingSpecRecenterPasses = 0
 local specRecenterElapsed = 0
+local wasInEditMode = false
 local rotationHighlightViewers = {
     EssentialCooldownViewer = true,
     UtilityCooldownViewer = true,
@@ -536,6 +537,7 @@ function RecenterViewer(viewer)
     local count = #icons
     if count == 0 then return end
     local viewerName = viewer.GetName and viewer:GetName() or ""
+    local inEditMode = IsEditModeOpen()
 
     local first = icons[1]
     local w = first:GetWidth() or 0
@@ -567,7 +569,7 @@ function RecenterViewer(viewer)
     if rowCount == 0 then return end
 
     local centerAdjustX, centerAdjustY = 0, 0
-    if viewerName == "EssentialCooldownViewer" then
+    if viewerName == "EssentialCooldownViewer" and not inEditMode then
         CaptureEssentialDesiredCenterFromViewer(viewer, false)
         if essentialDesiredCenter then
             local vx, vy = viewer:GetCenter()
@@ -783,8 +785,6 @@ driver:SetScript("OnEvent", function(_, event)
 
     if event == "PLAYER_ENTERING_WORLD" and e then
         CaptureEssentialDesiredCenterFromViewer(e, false)
-    elseif event == "EDIT_MODE_LAYOUTS_UPDATED" and e and IsEditModeOpen() then
-        CaptureEssentialDesiredCenterFromViewer(e, true)
     end
     if event == "PLAYER_SPECIALIZATION_CHANGED"
         or event == "PLAYER_TALENT_UPDATE"
@@ -824,6 +824,18 @@ SlashCmdList.MYSCRIPTSCDM = function(msg)
 end
 
 driver:SetScript("OnUpdate", function(_, dt)
+    local inEditMode = IsEditModeOpen()
+    if wasInEditMode and not inEditMode then
+        local essential = _G.EssentialCooldownViewer
+        if essential then
+            CaptureEssentialDesiredCenterFromViewer(essential, true)
+            if ENABLE_POSITIONING then
+                MarkViewerDirty(essential)
+            end
+        end
+    end
+    wasInEditMode = inEditMode
+
     ProcessSpecRecenter(dt)
     ProcessDirtyViewers()
     if trackedBarsDirty then
