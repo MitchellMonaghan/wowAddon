@@ -30,6 +30,11 @@ local VIEWER_NAMES = {
     "BuffIconCooldownViewer",
 }
 
+local TRINKET_SLOTS = {
+    INVSLOT_TRINKET1,
+    INVSLOT_TRINKET2,
+}
+
 local MIXIN_NAMES = {
     "CooldownViewerBuffIconItemMixin",
     "CooldownViewerEssentialItemMixin",
@@ -43,9 +48,11 @@ local trackedBarsBottomAnchor = nil
 local trackedBarsDirty = true
 local trackedBarsVisibleCount = -1
 local essentialDesiredCenter = nil
+local essentialTrinketOverlay = nil
 local pendingSpecRecenterPasses = 0
 local specRecenterElapsed = 0
 local wasInEditMode = false
+local essentialTrinketButtons = {}
 local rotationHighlightViewers = {
     EssentialCooldownViewer = true,
     UtilityCooldownViewer = true,
@@ -55,6 +62,8 @@ local lastSuggestedSpellID = nil
 local rotationDirty = true
 local RecenterViewer
 local MarkViewerDirty
+local GetReferenceEssentialButton
+local GetEssentialVisualOffset
 
 local function GetCooldownSkinStore()
     MyScriptsDB = MyScriptsDB or {}
@@ -73,8 +82,41 @@ local function CaptureEssentialDesiredCenterFromViewer(viewer, force)
     local vx, vy = viewer:GetCenter()
     local ux, uy = UIParent:GetCenter()
     if not vx or not vy or not ux or not uy then return end
+    local extraCount = 0
+    for i = 1, #TRINKET_SLOTS do
+        local button = essentialTrinketButtons[TRINKET_SLOTS[i]]
+        if button and button:IsShown() then
+            extraCount = extraCount + 1
+        end
+    end
+
+    local reference = GetReferenceEssentialButton(viewer)
+    local size = 0
+    if reference then
+        local isHorizontal = viewer.isHorizontal ~= false
+        size = isHorizontal and (reference:GetWidth() or 0) or (reference:GetHeight() or 0)
+        local offsetX, offsetY = GetEssentialVisualOffset(isHorizontal, size, extraCount)
+        local scale = viewer.GetEffectiveScale and viewer:GetEffectiveScale() or 1
+        vx = vx + (offsetX * scale)
+        vy = vy + (offsetY * scale)
+    end
+
     local rx, ry = vx - ux, vy - uy
     SaveEssentialDesiredCenter(rx, ry)
+end
+
+local function GetVisibleEssentialTrinketButtons()
+    local out = {}
+    for i = 1, #TRINKET_SLOTS do
+        local button = essentialTrinketButtons[TRINKET_SLOTS[i]]
+        if button and button:IsShown() and button:IsVisible() and (button:GetAlpha() or 0) > 0 then
+            out[#out + 1] = button
+        end
+    end
+    table.sort(out, function(a, b)
+        return (a._myScriptsTrinketSlot or 0) < (b._myScriptsTrinketSlot or 0)
+    end)
+    return out
 end
 
 local function EnsureBorder(button)
@@ -332,6 +374,127 @@ local function GetVisibleButtons(viewer)
     return out
 end
 
+GetReferenceEssentialButton = function(viewer)
+    if not viewer then return nil end
+    local children = { viewer:GetChildren() }
+    for i = 1, #children do
+        local child = children[i]
+        if child
+            and child.Icon
+            and child.Cooldown
+            and child._myScriptsCustomEssential ~= true
+            and child.cooldownID ~= nil
+            and child:IsShown()
+            and child:IsVisible()
+            and (child:GetAlpha() or 0) > 0
+        then
+            return child
+        end
+    end
+    return nil
+end
+
+local function IsEquippedOnUseTrinket(slot)
+    local itemID = GetInventoryItemID("player", slot)
+    if not itemID then return false, nil, nil, nil end
+    local spellName, spellID = GetItemSpell(itemID)
+    if not spellName or not spellID then
+        return false, itemID, nil, nil
+    end
+    local texture = GetInventoryItemTexture("player", slot)
+    if not texture then
+        return false, itemID, nil, nil
+    end
+    return true, itemID, spellID, texture
+end
+
+local function EnsureEssentialTrinketButton(viewer, slot)
+    if not viewer or not slot then return nil end
+    if not essentialTrinketOverlay then
+        essentialTrinketOverlay = CreateFrame("Frame", nil, UIParent)
+        essentialTrinketOverlay:SetAllPoints(UIParent)
+        essentialTrinketOverlay:SetFrameStrata("MEDIUM")
+        essentialTrinketOverlay:SetFrameLevel(1)
+    end
+    if essentialTrinketButtons[slot] and essentialTrinketButtons[slot]:GetParent() ~= essentialTrinketOverlay then
+        essentialTrinketButtons[slot]:SetParent(essentialTrinketOverlay)
+    end
+    if essentialTrinketButtons[slot] then
+        return essentialTrinketButtons[slot]
+    end
+
+    local button = CreateFrame("Frame", nil, essentialTrinketOverlay)
+    button:SetFrameStrata("MEDIUM")
+    button:SetFrameLevel(essentialTrinketOverlay:GetFrameLevel() + 5)
+    button._myScriptsCustomEssential = true
+    button._myScriptsTrinketSlot = slot
+    button:Hide()
+
+    local icon = button:CreateTexture(nil, "ARTWORK")
+    icon:SetAllPoints(button)
+    icon:SetTexCoord(0, 1, 0, 1)
+    button.Icon = icon
+
+    local cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
+    cooldown:SetAllPoints(button)
+    button.Cooldown = cooldown
+
+    essentialTrinketButtons[slot] = button
+    return button
+end
+
+local function UpdateEssentialTrinketButtons()
+    local viewer = _G.EssentialCooldownViewer
+    if not viewer then return end
+
+    local reference = GetReferenceEssentialButton(viewer)
+    local width = reference and reference:GetWidth() or 0
+    local height = reference and reference:GetHeight() or 0
+    local scale = reference and reference:GetScale() or 1
+    if width <= 0 then width = 36 end
+    if height <= 0 then height = 36 end
+    if not scale or scale <= 0 then scale = 1 end
+
+    local changed = false
+    for i = 1, #TRINKET_SLOTS do
+        local slot = TRINKET_SLOTS[i]
+        local button = EnsureEssentialTrinketButton(viewer, slot)
+        local wasShown = button:IsShown()
+        local isOnUse, itemID, spellID, texture = IsEquippedOnUseTrinket(slot)
+
+        button:SetScale(scale)
+        button:SetSize(width, height)
+
+        if isOnUse then
+            button.Icon:SetTexture(texture)
+            local startTime, duration, enable = GetInventoryItemCooldown("player", slot)
+            if button.Cooldown.SetCooldown then
+                button.Cooldown:SetCooldown((enable == 0 and 0) or (startTime or 0), (enable == 0 and 0) or (duration or 0))
+            end
+            button._myScriptsItemID = itemID
+            button._myScriptsSpellID = spellID
+            button:Show()
+        else
+            button._myScriptsItemID = nil
+            button._myScriptsSpellID = nil
+            if button.Cooldown.SetCooldown then
+                button.Cooldown:SetCooldown(0, 0)
+            end
+            button:Hide()
+        end
+
+        StyleButton(button)
+
+        if wasShown ~= button:IsShown() then
+            changed = true
+        end
+    end
+
+    if changed and ENABLE_POSITIONING then
+        MarkViewerDirty(viewer)
+    end
+end
+
 local function QueueSpecRecenter()
     pendingSpecRecenterPasses = SPEC_RECENTER_PASSES
     specRecenterElapsed = 0
@@ -462,6 +625,26 @@ local function CenteredOffsets(count, size, padding, direction)
     return out
 end
 
+local function GetTrinketAttachGap()
+    -- Each icon reveals its own dark border inside the frame by BORDER_REVEAL_INSET.
+    -- If we attach frame edge-to-edge, those revealed borders still create a visible seam.
+    -- Pull the trinket in by both insets so it visually abuts the last Essential icon.
+    return -(BORDER_REVEAL_INSET * 2)
+end
+
+GetEssentialVisualOffset = function(isHorizontal, size, extraCount)
+    if extraCount <= 0 then
+        return 0, 0
+    end
+
+    local attachGap = GetTrinketAttachGap()
+    local extension = extraCount * (size + attachGap)
+    if isHorizontal then
+        return extension * 0.5, 0
+    end
+    return 0, -(extension * 0.5)
+end
+
 local function InferCenters(icons)
     local pts = {}
     for i = 1, #icons do
@@ -538,9 +721,6 @@ function RecenterViewer(viewer)
     if count == 0 then return end
     local viewerName = viewer.GetName and viewer:GetName() or ""
     local inEditMode = IsEditModeOpen()
-    if viewerName == "EssentialCooldownViewer" and inEditMode then
-        return
-    end
 
     local first = icons[1]
     local w = first:GetWidth() or 0
@@ -571,6 +751,9 @@ function RecenterViewer(viewer)
     local rowCount = #rows
     if rowCount == 0 then return end
 
+    local extraButtons = viewerName == "EssentialCooldownViewer" and GetVisibleEssentialTrinketButtons() or nil
+    local extraCount = extraButtons and #extraButtons or 0
+
     local centerAdjustX, centerAdjustY = 0, 0
     if viewerName == "EssentialCooldownViewer" and not inEditMode then
         CaptureEssentialDesiredCenterFromViewer(viewer, false)
@@ -578,17 +761,17 @@ function RecenterViewer(viewer)
             local vx, vy = viewer:GetCenter()
             local ux, uy = UIParent:GetCenter()
             if vx and vy and ux and uy then
-                local currentRelX = vx - ux
-                local currentRelY = vy - uy
+                local visualOffsetX, visualOffsetY = GetEssentialVisualOffset(isHorizontal, isHorizontal and w or h, extraCount)
+                local scale = viewer.GetEffectiveScale and viewer:GetEffectiveScale() or 1
+                if scale <= 0 then
+                    scale = 1
+                end
+                local currentRelX = vx - ux + (visualOffsetX * scale)
+                local currentRelY = vy - uy + (visualOffsetY * scale)
                 local deltaX = essentialDesiredCenter.x - currentRelX
                 local deltaY = essentialDesiredCenter.y - currentRelY
-                if math.abs(deltaX) > 0.05 or math.abs(deltaY) > 0.05 then
-                    local p, relTo, relP, ox, oy = viewer:GetPoint(1)
-                    if p and relP and ox and oy then
-                        viewer:ClearAllPoints()
-                        viewer:SetPoint(p, relTo, relP, ox + deltaX, oy + deltaY)
-                    end
-                end
+                centerAdjustX = deltaX / scale
+                centerAdjustY = deltaY / scale
             end
         end
     end
@@ -622,8 +805,9 @@ function RecenterViewer(viewer)
             local xOffsets = CenteredOffsets(#row, w, xPad, iconDir)
             for i = 1, #row do
                 local button = row[i]
+                local x = xOffsets[i] or 0
                 button:ClearAllPoints()
-                button:SetPoint("CENTER", viewer, "CENTER", (xOffsets[i] or 0) + centerAdjustX, y + centerAdjustY)
+                button:SetPoint("CENTER", viewer, "CENTER", x + centerAdjustX, y + centerAdjustY)
             end
         end
     else
@@ -639,8 +823,47 @@ function RecenterViewer(viewer)
             local yOffsets = CenteredOffsets(#col, h, yPad, yDir)
             for i = 1, #col do
                 local button = col[i]
+                local yOffset = yOffsets[i] or 0
                 button:ClearAllPoints()
-                button:SetPoint("CENTER", viewer, "CENTER", x + centerAdjustX, (yOffsets[i] or 0) + centerAdjustY)
+                button:SetPoint("CENTER", viewer, "CENTER", x + centerAdjustX, yOffset + centerAdjustY)
+            end
+        end
+    end
+
+    if viewerName == "EssentialCooldownViewer" and extraButtons and #extraButtons > 0 then
+        local attachGap = GetTrinketAttachGap()
+        table.sort(extraButtons, function(a, b)
+            return (a._myScriptsTrinketSlot or 0) < (b._myScriptsTrinketSlot or 0)
+        end)
+
+        local anchor = icons[#icons]
+        if not anchor then
+            anchor = viewer
+        end
+
+        for i = 1, #extraButtons do
+            local button = extraButtons[i]
+            button:ClearAllPoints()
+            if isHorizontal then
+                if i == 1 then
+                    if anchor == viewer then
+                        button:SetPoint("CENTER", viewer, "CENTER", centerAdjustX, centerAdjustY)
+                    else
+                        button:SetPoint("LEFT", anchor, "RIGHT", attachGap, 0)
+                    end
+                else
+                    button:SetPoint("LEFT", extraButtons[i - 1], "RIGHT", attachGap, 0)
+                end
+            else
+                if i == 1 then
+                    if anchor == viewer then
+                        button:SetPoint("CENTER", viewer, "CENTER", centerAdjustX, centerAdjustY)
+                    else
+                        button:SetPoint("TOP", anchor, "BOTTOM", 0, -attachGap)
+                    end
+                else
+                    button:SetPoint("TOP", extraButtons[i - 1], "BOTTOM", 0, -attachGap)
+                end
             end
         end
     end
@@ -648,10 +871,6 @@ end
 
 MarkViewerDirty = function(viewer)
     if not viewer then return end
-    local viewerName = viewer.GetName and viewer:GetName() or ""
-    if viewerName == "EssentialCooldownViewer" and IsEditModeOpen() then
-        return
-    end
     dirtyViewers[viewer] = true
 end
 
@@ -697,6 +916,7 @@ local function ProcessDirtyViewers()
 end
 
 local function ApplyToAll()
+    UpdateEssentialTrinketButtons()
     for i = 1, #VIEWER_NAMES do
         local viewer = _G[VIEWER_NAMES[i]]
         if viewer then
@@ -787,6 +1007,8 @@ driver:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 driver:RegisterEvent("TRAIT_CONFIG_UPDATED")
 driver:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
 driver:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED")
+driver:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
+driver:RegisterEvent("BAG_UPDATE_COOLDOWN")
 driver:SetScript("OnEvent", function(_, event)
     local e = _G.EssentialCooldownViewer
     local inEditMode = IsEditModeOpen()
@@ -798,6 +1020,7 @@ driver:SetScript("OnEvent", function(_, event)
         or event == "PLAYER_TALENT_UPDATE"
         or event == "SPELLS_CHANGED"
         or event == "TRAIT_CONFIG_UPDATED"
+        or event == "PLAYER_EQUIPMENT_CHANGED"
     then
         QueueSpecRecenter()
     end
