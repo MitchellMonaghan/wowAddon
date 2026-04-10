@@ -538,6 +538,9 @@ function RecenterViewer(viewer)
     if count == 0 then return end
     local viewerName = viewer.GetName and viewer:GetName() or ""
     local inEditMode = IsEditModeOpen()
+    if viewerName == "EssentialCooldownViewer" and inEditMode then
+        return
+    end
 
     local first = icons[1]
     local w = first:GetWidth() or 0
@@ -645,6 +648,10 @@ end
 
 MarkViewerDirty = function(viewer)
     if not viewer then return end
+    local viewerName = viewer.GetName and viewer:GetName() or ""
+    if viewerName == "EssentialCooldownViewer" and IsEditModeOpen() then
+        return
+    end
     dirtyViewers[viewer] = true
 end
 
@@ -782,6 +789,7 @@ driver:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
 driver:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED")
 driver:SetScript("OnEvent", function(_, event)
     local e = _G.EssentialCooldownViewer
+    local inEditMode = IsEditModeOpen()
 
     if event == "PLAYER_ENTERING_WORLD" and e then
         CaptureEssentialDesiredCenterFromViewer(e, false)
@@ -798,7 +806,7 @@ driver:SetScript("OnEvent", function(_, event)
     trackedBarsDirty = true
     rotationDirty = true
     RefreshRotationHighlights(true)
-    if ENABLE_POSITIONING and e then
+    if ENABLE_POSITIONING and e and not inEditMode then
         MarkViewerDirty(e)
     end
 end)
