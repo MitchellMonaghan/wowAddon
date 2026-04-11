@@ -143,9 +143,14 @@ local function EnsureBorder(button)
 end
 
 local function StyleButton(button)
-    if not button or styledButtons[button] then return end
+    if not button then return end
     if not button.Icon or not button.Cooldown then return end
     if not button.Icon.SetTexCoord then return end
+
+    if styledButtons[button] then
+        EnsureBorder(button)
+        return
+    end
 
     button:SetScale(1)
 
@@ -382,7 +387,6 @@ GetReferenceEssentialButton = function(viewer)
         if child
             and child.Icon
             and child.Cooldown
-            and child._myScriptsCustomEssential ~= true
             and child.cooldownID ~= nil
             and child:IsShown()
             and child:IsVisible()
@@ -408,8 +412,8 @@ local function IsEquippedOnUseTrinket(slot)
     return true, itemID, spellID, texture
 end
 
-local function EnsureEssentialTrinketButton(viewer, slot)
-    if not viewer or not slot then return nil end
+local function EnsureEssentialTrinketButton(slot)
+    if not slot then return nil end
     if not essentialTrinketOverlay then
         essentialTrinketOverlay = CreateFrame("Frame", nil, UIParent)
         essentialTrinketOverlay:SetAllPoints(UIParent)
@@ -458,7 +462,7 @@ local function UpdateEssentialTrinketButtons()
     local changed = false
     for i = 1, #TRINKET_SLOTS do
         local slot = TRINKET_SLOTS[i]
-        local button = EnsureEssentialTrinketButton(viewer, slot)
+        local button = EnsureEssentialTrinketButton(slot)
         local wasShown = button:IsShown()
         local isOnUse, itemID, spellID, texture = IsEquippedOnUseTrinket(slot)
 
